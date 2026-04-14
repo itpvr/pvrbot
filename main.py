@@ -1,88 +1,68 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import os
-import datetime
 import asyncio
-from flask import Flask
-from threading import Thread
 
-# --- ส่วนของ Web Server (แก้เรื่อง Port สำหรับ Render) ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-def run():
-    # Render จะส่ง Port มาให้ผ่าน Environment Variable ชื่อ PORT
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# --- ตั้งค่าบอท ---
-TARGET_CHANNEL_ID = 1069137562213552128 # ไอดีห้องที่คุณกำหนด
+# --- ตั้งค่าพื้นฐาน ---
+TOKEN = os.getenv('DISCORD_TOKEN')
+TARGET_CHANNEL_ID = 1069137562213552128  # ID ห้องที่คุณต้องการให้บอทอยู่
 
 intents = discord.Intents.default()
-intents.voice_states = True      # สำคัญ: ต้องเปิดใน Discord Developer Portal ด้วย
 intents.message_content = True
-intents.guilds = True
+intents.voice_states = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
-active_users = {}
+bot = commands.Bot(command_id="!", intents=intents)
 
+# --- ระบบตรวจเช็คห้องเสียงทุก 5 นาที ---
+@tasks.loop(minutes=5)
+async def check_voice_status():
+    await bot.wait_until_ready()
+    channel = bot.get_channel(TARGET_CHANNEL_ID)
+    
+    if channel is None:
+        print(f"❌ ไม่พบห้อง ID {TARGET_CHANNEL_ID} กรุณาเช็ค ID อีกครั้ง")
+        return
+
+    # หา voice_client ของ Server นี้
+    guild = channel.guild
+    vc = guild.voice_client
+
+    try:
+        if vc is None:
+            # กรณีที่ 1: บอทไม่ได้อยู่ในห้องไหนเลย
+            print("🔍 ตรวจพบ: บอทไม่อยู่ในห้องเสียง กำลังเข้าร่วม...")
+            await channel.connect(reconnect=True, timeout=20)
+            print(f"🏠 เข้าห้อง {channel.name} สำเร็จ")
+        
+        elif vc.channel.id != TARGET_CHANNEL_ID:
+            # กรณีที่ 2: บอทอยู่ผิดห้อง (โดนลากไป)
+            print(f"🔍 ตรวจพบ: บอทอยู่ผิดห้อง ({vc.channel.name}) กำลังย้ายกลับ...")
+            await vc.move_to(channel)
+            print(f"🏠 ย้ายกลับเข้าห้อง {channel.name} เรียบร้อย")
+            
+        else:
+            # กรณีปกติ: อยู่ในห้องถูกต้องแล้ว
+            # print("✅ บอทยังอยู่ในห้องปกติ")
+            pass
+
+    except Exception as e:
+        print(f"❌ เกิดข้อผิดพลาดขณะเข้าห้องเสียง: {e}")
+
+# --- Event เมื่อบอทพร้อมทำงาน ---
 @bot.event
 async def on_ready():
-    await bot.wait_until_ready() # เพิ่มบรรทัดนี้: รอให้ระบบโหลดข้อมูลเซิร์ฟเวอร์ให้ครบก่อน
-    print(f'✅ ออนไลน์แล้ว: {bot.user}')
-    
-    channel = bot.get_channel(TARGET_CHANNEL_ID)
-    if channel:
-        try:
-            # เช็คว่าบอทอยู่ในห้องอยู่แล้วหรือเปล่า (กันบัคเข้าซ้อน)
-            voice_client = discord.utils.get(bot.voice_clients, guild=channel.guild)
-            if not voice_client:
-                await channel.connect()
-                print(f"🏠 บอทเข้าห้อง {channel.name} เรียบร้อยแล้ว")
-        except Exception as e:
-            print(f"❌ เข้าห้องไม่ได้ Error: {e}")
-    else:
-        print(f"❌ หาห้อง ID {TARGET_CHANNEL_ID} ไม่เจอ! (เช็คสิทธิ์การมองเห็น)")
+    print(f'✅ ออนไลน์แล้วในชื่อ: {bot.user}')
+    # เริ่มต้นระบบเช็คห้องอัตโนมัติ
+    if not check_voice_status.is_running():
+        check_voice_status.start()
 
+# --- ลบ on_voice_state_update ของเก่าออก ---
+# เราจะไม่ใช้ระบบ Event เพื่อป้องกัน Loop นรก 4006 อีกต่อไป
+# แต่ถ้าอยากให้มี Log ไว้ดู ก็เขียนสั้นๆ พอครับ
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # เช็คว่าสถานะที่เปลี่ยนคือตัวบอทเอง ไม่ใช่คนอื่น
     if member.id == bot.user.id:
-        
-        # กรณีที่ 1: หลุดจากห้อง หรือถูกเตะออก (before มีห้อง แต่ after ไม่มีห้อง)
         if before.channel is not None and after.channel is None:
-            print("⚠️ บอทหลุดจากห้อง! กำลังเช็คสถานะเพื่อกลับไปห้องเดิม...")
-            # รอ 10 วินาทีให้ Discord เคลียร์ Error 4006 (ห้ามปรับให้น้อยกว่านี้)
-            await asyncio.sleep(10)
-            
-            # เช็คว่า ณ ตอนนี้ บอทยังไม่ได้ต่อใช่มั้ย? (กันโค้ดทำงานซ้อนกัน)
-            vc = member.guild.voice_client
-            if vc is None or not vc.is_connected():
-                try:
-                    print("🔄 กำลังพยายามเชื่อมต่อใหม่...")
-                    await before.channel.connect()
-                    print("🏠 กลับเข้าห้องเป้าหมายสำเร็จ")
-                except Exception as e:
-                    print(f"❌ เข้าห้องไม่ได้: {e}")
+            print("ℹ️ บอทออกจากห้องเสียง (จะกลับเข้าที่ในรอบตรวจถัดไป)")
 
-        # กรณีที่ 2: มีแอดมินลากบอทไปห้องอื่น (before มีห้อง, after มีห้อง แต่คนละห้อง)
-        elif before.channel is not None and after.channel is not None and before.channel.id != after.channel.id:
-            print(f"⚠️ บอทถูกลากไปห้อง: {after.channel.name}")
-            # ถ้าอยากให้บอทดื้อ ดึงกลับห้องเดิมเสมอ ให้ลบเครื่องหมาย # สองบรรทัดล่างออกครับ
-            # await asyncio.sleep(3)
-            # await before.channel.connect()
-
-# เริ่มทำงาน
-keep_alive()
-token = os.environ.get('DISCORD_TOKEN')
-if token:
-    bot.run(token)
-else:
-    print("❌ ไม่พบ DISCORD_TOKEN")
+bot.run(TOKEN)
