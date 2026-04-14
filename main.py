@@ -35,15 +35,21 @@ active_users = {}
 
 @bot.event
 async def on_ready():
+    await bot.wait_until_ready() # เพิ่มบรรทัดนี้: รอให้ระบบโหลดข้อมูลเซิร์ฟเวอร์ให้ครบก่อน
     print(f'✅ ออนไลน์แล้ว: {bot.user}')
-    # ให้บอทลองเข้าห้องทันทีเมื่อออนไลน์
+    
     channel = bot.get_channel(TARGET_CHANNEL_ID)
     if channel:
         try:
-            await channel.connect()
-            print(f"🏠 บอทเข้าห้อง {channel.name} เรียบร้อยแล้ว")
+            # เช็คว่าบอทอยู่ในห้องอยู่แล้วหรือเปล่า (กันบัคเข้าซ้อน)
+            voice_client = discord.utils.get(bot.voice_clients, guild=channel.guild)
+            if not voice_client:
+                await channel.connect()
+                print(f"🏠 บอทเข้าห้อง {channel.name} เรียบร้อยแล้ว")
         except Exception as e:
-            print(f"❌ เข้าห้องไม่ได้: {e}")
+            print(f"❌ เข้าห้องไม่ได้ Error: {e}")
+    else:
+        print(f"❌ หาห้อง ID {TARGET_CHANNEL_ID} ไม่เจอ! (เช็คสิทธิ์การมองเห็น)")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
