@@ -14,7 +14,7 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- ระบบตรวจเช็คห้องเสียงทุก 5 นาที ---
-@tasks.loop(minutes=5)
+@tasks.loop(seconds=5)
 async def check_voice_status():
     await bot.wait_until_ready()
     channel = bot.get_channel(TARGET_CHANNEL_ID)
