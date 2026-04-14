@@ -13,27 +13,25 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- ฟังก์ชันตั้งค่าสถานะแบบ Minimalist (รันแค่ครั้งเดียวตอนออนไลน์) ---
 async def set_minimalist_presence():
-    # สร้าง Activity แบบ Listening (กำลังฟัง)
+    # สร้าง Activity โดยใส่ค่าทั้งหมดลงไปใน constructor ทีเดียวเลยครับ
     minimal_activity = discord.Activity(
         type=discord.ActivityType.listening, 
-        name="6str - Kinda miss you ft. flug 🎷"
+        name="6str - Kinda miss you ft. flug 🎷",
+        details="6str - Kinda miss you ft. flug", # ข้อความบรรทัดที่สอง
+        assets={
+            "large_image": "kinda", # ชื่อไฟล์ที่อัปโหลดใน Developer Portal (ตรงนี้สำคัญ!)
+            "large_text": "6str - Kinda miss you ft. flug"
+        },
+        buttons=[
+            {
+                "label": "Listen on gosu.wav 🎧", 
+                "url": "https://gosuwav.vercel.app/artist/6str?track=86efea40-82d5-4960-86ae-50aeaf86eb25"
+            }
+        ]
     )
     
-    # 🖼️ ดึงรูปจาก Asset ที่อัปโหลดใน Developer Portal
-    # ใส่ชื่อ Asset Key ที่คุณตั้งไว้ (ในที่นี้คือ "kinda")
-    minimal_activity.large_image_url = "kinda" 
-    minimal_activity.large_image_text = "6str - Kinda miss you ft. flug"
-    
-    # 🔗 ปุ่มกดฟังเพลง
-    minimal_activity.buttons = [
-        {
-            "label": "Listen on gosu.wav 🎧", 
-            "url": "https://gosuwav.vercel.app/artist/6str?track=86efea40-82d5-4960-86ae-50aeaf86eb25"
-        }
-    ]
-    
+    # สั่งเปลี่ยนสถานะ
     await bot.change_presence(status=discord.Status.online, activity=minimal_activity)
-
 # --- Event เมื่อบอทพร้อม (Setup presence และ tasks) ---
 @bot.event
 async def on_ready():
