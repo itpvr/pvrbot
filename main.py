@@ -11,28 +11,33 @@ intents = discord.Intents.default()
 intents.voice_states = True # Needed for voice check
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- ฟังก์ชันตั้งค่าสถานะแบบ Minimalist (รันแค่ครั้งเดียวตอนออนไลน์) ---
 async def set_minimalist_presence():
-    MY_APP_ID = 1493633885173579878
-    # สร้าง Activity โดยใส่ค่าทั้งหมดลงไปใน constructor ทีเดียวเลยครับ
-    minimal_activity = discord.Activity(
-        type=discord.ActivityType.listening, 
-        name="6str - Kinda miss you ft. flug 🎷",
-        details="6str - Kinda miss you ft. flug", # ข้อความบรรทัดที่สอง
+    MY_APP_ID = 1493633885173579878  # <--- อย่าลืมใส่ ID ของคุณเหมือนเดิม
+
+    activity = discord.Activity(
+        type=discord.ActivityType.listening,
+        name="Spotify", # ตรงนี้ต้องใส่ว่า Spotify เพื่อให้มันขึ้น Listening to Spotify
+        application_id=MY_APP_ID,
+        
+        # รายละเอียดเพลง (เหมือน Spotify เป๊ะ)
+        details="Kinda miss you ft. flug", # ชื่อเพลง
+        state="by 6str ▬▬▬🔘▬▬▬▬ 1:34", # ชื่อศิลปิน + แถบเวลาปลอม
+        
         assets={
-            "large_image": "kinda", # ชื่อไฟล์ที่อัปโหลดใน Developer Portal (ตรงนี้สำคัญ!)
-            "large_text": "6str - Kinda miss you ft. flug"
+            "large_image": "kinda",        # รูปหน้าปกเพลง
+            "large_text": "Kinda miss you", # เอาเมาส์ชี้แล้วขึ้นชื่อเพลง
+            "small_image": "spotify_logo", # โลโก้ Spotify เล็กๆ ที่มุมรูป (ถ้าอัปโหลดไว้)
+            "small_text": "Verified Artist" 
         },
         buttons=[
             {
-                "label": "Listen on gosu.wav 🎧", 
+                "label": "Play on gosu.wav 🎧", 
                 "url": "https://gosuwav.vercel.app/artist/6str?track=86efea40-82d5-4960-86ae-50aeaf86eb25"
             }
         ]
     )
-    
-    # สั่งเปลี่ยนสถานะ
-    await bot.change_presence(status=discord.Status.online, activity=minimal_activity)
+
+    await bot.change_presence(status=discord.Status.online, activity=activity)
 # --- Event เมื่อบอทพร้อม (Setup presence และ tasks) ---
 @bot.event
 async def on_ready():
