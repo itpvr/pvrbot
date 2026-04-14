@@ -11,7 +11,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-bot = commands.Bot(command_id="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- ระบบตรวจเช็คห้องเสียงทุก 5 นาที ---
 @tasks.loop(minutes=5)
