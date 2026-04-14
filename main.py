@@ -16,12 +16,12 @@ async def set_minimalist_presence():
 
     activity = discord.Activity(
         type=discord.ActivityType.listening,
-        name="Spotify", # ตรงนี้ต้องใส่ว่า Spotify เพื่อให้มันขึ้น Listening to Spotify
+        name="♫ Listening to GOSU.WAV", # ตรงนี้ต้องใส่ว่า Spotify เพื่อให้มันขึ้น Listening to Spotify
         application_id=MY_APP_ID,
         
         # รายละเอียดเพลง (เหมือน Spotify เป๊ะ)
         details="Kinda miss you ft. flug", # ชื่อเพลง
-        state="by 6str ▬▬▬🔘▬▬▬▬ 1:34", # ชื่อศิลปิน + แถบเวลาปลอม
+        state="", # ชื่อศิลปิน + แถบเวลาปลอม
         
         assets={
             "large_image": "kinda",        # รูปหน้าปกเพลง
