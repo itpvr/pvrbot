@@ -5,8 +5,7 @@ import asyncio
 
 # --- ตั้งค่าพื้นฐาน (เหมือนเดิม) ---
 TOKEN = os.getenv('DISCORD_TOKEN')
-# TARGET_CHANNEL_ID = 1069137562213552128 # ID ห้องเสียงที่คุณต้องการให้บอทอยู่
-TARGET_CHANNEL_ID = 1243551707695157379
+TARGET_CHANNEL_ID = 1069137562213552128
 
 intents = discord.Intents.default()
 intents.voice_states = True # Needed for voice check
