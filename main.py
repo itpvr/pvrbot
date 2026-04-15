@@ -17,8 +17,8 @@ async def set_minimalist_presence():
     MY_APP_ID = 1493633885173579878  # <--- อย่าลืมใส่ ID ของคุณเหมือนเดิม
 
     activity = discord.Activity(
-        type=discord.ActivityType.listening,
-        name="♫ Listening to GOSU.WAV", # ตรงนี้ต้องใส่ว่า Spotify เพื่อให้มันขึ้น Listening to Spotify
+        type=discord.ActivityType.Playing,
+        name="noting", 
         application_id=MY_APP_ID,
 
         # รายละเอียดเพลง (เหมือน Spotify เป๊ะ)
