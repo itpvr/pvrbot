@@ -67,33 +67,31 @@ async def set_minimalist_presence():
     )
     await bot.change_presence(status=discord.Status.online, activity=activity)
 
-@tasks.loop(seconds=5)
+@tasks.loop(seconds=10) # ปรับจาก 5 เป็น 10 วินาที เพื่อไม่ให้ Discord มองว่าเราสแปม
 async def check_voice_status():
     await bot.wait_until_ready()
     channel = bot.get_channel(TARGET_CHANNEL_ID)
     if channel is None: return
 
     guild = channel.guild
-    vc = guild.voice_client
+    # ดึงค่า voice_client แบบสดๆ ทุกรอบ
+    vc = discord.utils.get(bot.voice_clients, guild=guild)
 
     try:
-        if vc is None:
-            # ถ้าไม่อยู่ในห้องเลย ให้ลองเข้า
+        if vc is None or not vc.is_connected():
+            print("🔄 [Backup Bot] กำลังสร้างการเชื่อมต่อใหม่จากศูนย์...")
+            # ก่อนต่อใหม่ ให้มั่นใจว่าไม่มีซากเก่าค้างอยู่
+            if vc: await vc.disconnect(force=True)
             await channel.connect(reconnect=True, timeout=20)
         elif vc.channel.id != TARGET_CHANNEL_ID:
-            # อยู่ผิดห้อง ให้ย้าย
+            print("🔄 [Backup Bot] ย้ายห้องให้ถูกต้อง...")
             await vc.move_to(channel)
-            
     except Exception as e:
-        # 🔥 นี่คือจุดแก้ 4006: ถ้าพัง ให้สั่งตัดการเชื่อมต่อแบบรุนแรงทันที
-        print(f"⚠️ Voice Error: {e} | กำลังล้าง Session...")
-        if vc:
-            try:
-                await vc.disconnect(force=True) # ล้าง Session ที่บูดทิ้ง
-            except:
-                pass
-        # พักสักครู่ให้ Discord ลืมเซสชันเก่า
-        await asyncio.sleep(2)
+        print(f"❌ [Backup Bot] 4006 Error หรืออื่นๆ: {e}")
+        # ถ้าพัง ให้เตะตัวเองออกจากห้องในระดับ Library ไปเลย
+        for x in bot.voice_clients:
+            if x.guild == guild:
+                await x.disconnect(force=True)
         
 @bot.event
 async def on_voice_state_update(member, before, after):
