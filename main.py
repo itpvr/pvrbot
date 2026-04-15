@@ -123,38 +123,21 @@ async def say(ctx, *, message: str):
         except Exception as e:
             print(f"⚠️ คำเตือน: บอทลบข้อความไม่ได้ เนื่องจาก: {e}")
     else:
-        print(f"🚫 มีคนพยายามสวมรอย: {ctx.author.name}")
-
-# คำสั่ง: !pvr clear
+        # ถ้าไม่ใช่คุณสั่ง บอทจะนิ่งเฉย (และไม่ลบข้อความด้วย เพื่อให้เห็นว่าใครมาเนียน)
+        print(f"🚫 มีคนพยายามสวมรอย: {ctx.author.name} (ID: {ctx.author.id})")
+# --- คำสั่งย่อย !pvr clear [จำนวน] ---
 @pvr.command(name="clear")
 async def clear(ctx, amount: int = 5):
+    # ตรวจสอบ ID คุณคนเดียว
     if ctx.author.id == 431421372133277698:
         try:
+            # ลบข้อความ (บวก 1 เพื่อลบตัวคำสั่งออกไปด้วย)
             deleted = await ctx.channel.purge(limit=amount + 1)
+            
+            # ส่งข้อความบอกสถานะ แล้วลบตัวเองทิ้งใน 3 วินาที (ไม่ให้รกแชท)
             await ctx.send(f"🧹 ล้างประวัติแชทให้แล้ว {len(deleted)-1} ข้อความครับ", delete_after=3)
-            print(f"✅ Clear success: {len(deleted)-1} messages")
+            
+            print(f"✅ Clear success: {len(deleted)-1} messages by {ctx.author.name}")
         except Exception as e:
             print(f"❌ Clear error: {e}")
-
-# ==========================================
-# 🚀 6. การเริ่มต้นทำงาน (Boot Sequence)
-# ==========================================
-@bot.event
-async def on_ready():
-    print(f'✅ ออนไลน์แล้วในชื่อ: {bot.user}')
-    await set_minimalist_presence()
-    
-    # 🛑 เช็คว่ารันบน Render หรือไม่? 
-    # (เราจะไปตั้งค่า IS_RENDER เป็น True ในหน้าเว็บ Render)
-    if os.getenv("IS_RENDER") != "True":
-        if not hasattr(bot, 'voice_check_task') or not bot.voice_check_task.is_running():
-            bot.voice_check_task = check_voice_status.start()
-            print("🏠 [GCP Mode] Voice Check Loop Started")
-    else:
-        print("🌐 [Render Mode] บอทออนไลน์เพื่อรับ Cronjob เท่านั้น (ปิดระบบเข้าห้องเสียงเพื่อเลี่ยง Error 4006)")
-
-# เรียก Web Server ให้ทำงาน "ก่อน" บอทรัน
-keep_alive()
-
-# รันบอท
 bot.run(TOKEN)
