@@ -67,7 +67,6 @@ async def set_minimalist_presence():
     )
     await bot.change_presence(status=discord.Status.online, activity=activity)
 
-# --- 4. Loop เช็คห้องเสียง 24 ชม. ---
 @tasks.loop(seconds=5)
 async def check_voice_status():
     await bot.wait_until_ready()
@@ -79,20 +78,23 @@ async def check_voice_status():
 
     try:
         if vc is None:
+            # ถ้าไม่อยู่ในห้องเลย ให้ลองเข้า
             await channel.connect(reconnect=True, timeout=20)
         elif vc.channel.id != TARGET_CHANNEL_ID:
+            # อยู่ผิดห้อง ให้ย้าย
             await vc.move_to(channel)
+            
     except Exception as e:
-        # 🔥 ตรงนี้คือหัวใจสำคัญครับ ถ้าเจอ Error อะไรก็ตาม ให้สั่งล้าง Session ทิ้งทันที
-        print(f"⚠️ เกิดข้อผิดพลาดในระบบเสียง: {e}")
+        # 🔥 นี่คือจุดแก้ 4006: ถ้าพัง ให้สั่งตัดการเชื่อมต่อแบบรุนแรงทันที
+        print(f"⚠️ Voice Error: {e} | กำลังล้าง Session...")
         if vc:
             try:
-                # สั่งยกเลิกการเชื่อมต่อแบบถอนรากถอนโคน
-                await vc.disconnect(force=True)
-                await asyncio.sleep(1) 
+                await vc.disconnect(force=True) # ล้าง Session ที่บูดทิ้ง
             except:
                 pass
-
+        # พักสักครู่ให้ Discord ลืมเซสชันเก่า
+        await asyncio.sleep(2)
+        
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.id == bot.user.id and before.channel is not None and after.channel is None:
