@@ -2,6 +2,12 @@ import discord
 from discord.ext import commands, tasks
 import os
 import asyncio
+import psutil
+import time
+import datetime
+
+# เก็บเวลาที่เริ่มรันบอทไว้คำนวณ Uptime
+start_time = time.time()
 
 # --- ตั้งค่าพื้นฐาน (เหมือนเดิม) ---
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -110,4 +116,36 @@ async def clear(ctx, amount: int = 5):
             print(f"✅ Clear success: {len(deleted)-1} messages by {ctx.author.name}")
         except Exception as e:
             print(f"❌ Clear error: {e}")
+
+@bot.command()
+async def status(ctx):
+    # 1. คำนวณ Uptime
+    current_time = time.time()
+    difference = int(round(current_time - start_time))
+    text_uptime = str(datetime.timedelta(seconds=difference))
+
+    # 2. อ่านค่า RAM
+    ram = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    
+    # 3. อ่านค่า Disk และ CPU
+    disk = psutil.disk_usage('/')
+    cpu = psutil.cpu_percent()
+
+    # 4. สร้างข้อความรายงาน
+    report = (
+        f"**📊 Health Report**\n"
+        f"---"
+        f"\n⏱️ **Uptime:** `{text_uptime}`"
+        f"\n🏎️ **Bot Latency:** `{round(bot.latency * 1000)}ms`"
+        f"\n🖥️ **CPU Usage:** `{cpu}%`"
+        f"\n🧠 **RAM:** `{ram.used // (1024**2)}MB` / `{ram.total // (1024**2)}MB`"
+        f"\n🔄 **Swap:** `{swap.used // (1024**2)}MB` / `{swap.total // (1024**2)}MB`"
+        f"\n💾 **Disk:** `{disk.percent}% used`"
+        f"\n---"
+    )
+    
+    await ctx.send(report)
+
 bot.run(TOKEN)
+
