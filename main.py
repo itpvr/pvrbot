@@ -154,22 +154,24 @@ async def status(ctx):
     
     await ctx.send(report)
 
-@bot.command(aliases=['ถาม', 'ลุงอ๊อด'])
+@bot.command(aliases=['ood'])
 async def ask(ctx, *, question: str):
     async with ctx.typing():
         try:
             # ใช้ Llama 3.3 ตัวท็อปสุด ฟรีและเร็วมาก
             chat_completion = await groq_client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "คุณคือ 'ลุงอ๊อด' บอทดิสคอร์ดสูงวัยสุดเก๋า ใจดี แต่มีความกวนนิดๆ ชอบตอบสั้นๆ กระชับ และตอบเป็นภาษาไทยเสมอ"
-                    },
-                    {
-                        "role": "user",
-                        "content": question,
-                    }
-                ],
+                messages=
+                {
+                    "role": "system",
+                    "content": (
+                        "คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณที่อาศัยอยู่ในกรุงเทพฯ "
+                        "นิสัยกวนตีนแบบผู้ใหญ่ใจดี แต่ต้องคุยรู้เรื่องและมีสาระ "
+                        "เงื่อนไขเหล็ก: 1. ตอบเป็นภาษาไทยภาคกลางที่ถูกต้องเท่านั้น "
+                        "2. ห้ามใช้ภาษาจีน ภาษาอังกฤษ หรือภาษาแปลกๆ อื่นเด็ดขาด "
+                        "3. ห้ามตอบเป็นภาษาอินโดนีเซียหรือภาษาอื่นที่คล้ายไทย "
+                        "4. ตอบสั้นๆ กระชับ เนียนเหมือนคนไทยจริงๆ คุย"
+                    )
+                },
                 model="llama-3.3-70b-versatile",
                 temperature=0.7,
                 max_tokens=1024,
@@ -180,11 +182,11 @@ async def ask(ctx, *, question: str):
             if len(answer) > 1900:
                 answer = answer[:1900] + "\n\n*(เนื้อหายาวเกินไป ลุงอ๊อดขอตัดจบแค่นี้นะ!)*"
                 
-            await ctx.send(f"🧠 **ลุงอ๊อดตอบ:**\n{answer}")
+            await ctx.send(f"{answer}")
             
         except Exception as e:
             print(f"Groq Error: {e}")
             await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบเซิร์ฟเวอร์ขัดข้องนิดหน่อย ลองใหม่อีกทีนะ")
-            
+
 bot.run(TOKEN)
 
