@@ -5,80 +5,123 @@ import asyncio
 import psutil
 import time
 import datetime
-import google.generativeai as genai
+from google import genai
 
-# --- [ 1. ตั้งค่า AI และสถานะบอท ] ---
-# ⚠️ สำคัญมาก: เปลี่ยน KEY นี้ด้วยนะหลาน เพราะตัวเก่าหลุดไปแล้ว!
-GEMINI_API_KEY = 'AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM' 
-genai.configure(api_key=GEMINI_API_KEY)
-model_ai = genai.GenerativeModel('gemini-1.5-flash')
+GEMINI_API_KEY = 'AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM'
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+
+
 
 start_time = time.time()
+# --- ตั้งค่าพื้นฐาน (เหมือนเดิม) ---
 TOKEN = os.getenv('DISCORD_TOKEN')
 TARGET_CHANNEL_ID = 1069137562213552128
 
-# --- [ 2. ตั้งค่า Intents (ต้องตั้งก่อนสร้าง bot) ] ---
 intents = discord.Intents.default()
-intents.voice_states = True 
-intents.message_content = True  
+intents.voice_states = True # Needed for voice check
+bot = commands.Bot(command_prefix="!", intents=intents)
+intents.message_content = True  # ✅ ต้องมีบรรทัดนี้! (สำคัญมากสำหรับคำสั่ง !)
 intents.messages = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
     print(f'✅ ออนไลน์แล้วในชื่อ: {bot.user}')
+    # 2. 🏠 เริ่มต้นระบบเช็คห้องเสียงอันแสนเสถียรของเรา (ขาดตัวนี้ไม่ได้!)
     if not hasattr(bot, 'voice_check_task') or not bot.voice_check_task.is_running():
         bot.voice_check_task = check_voice_status.start()
         print("🏠 Voice Check Loop Started")
 
-# --- [ 3. ระบบเช็คห้องเสียง 24 ชม. ] ---
+    text_channel = bot.get_channel(123456789012345678) 
+    if text_channel:
+        await text_channel.send("🚀 บอท gosu.wav ออนไลน์พร้อมใช้งานแล้ว!")
+
+# --- (โค้ดเช็คห้องเสียง อันเดิมของคุณที่รัน 24 ชม. ห้ามลบนะครับ!) ---
+# เช็คทุก 5 วินาทีตามที่คุณตั้งไว้
 @tasks.loop(seconds=5)
 async def check_voice_status():
     await bot.wait_until_ready()
     channel = bot.get_channel(TARGET_CHANNEL_ID)
-    if channel is None: return
+
+    if channel is None:
+        return
+
     guild = channel.guild
     vc = guild.voice_client
+
     try:
         if vc is None:
+            # print("🔍 ตรวจพบ: บอทไม่อยู่ในห้องเสียง กำลังเข้าร่วม...")
             await channel.connect(reconnect=True, timeout=20)
+            # print(f"🏠 เข้าห้อง {channel.name} สำเร็จ")
         elif vc.channel.id != TARGET_CHANNEL_ID:
+            # print(f"🔍 ตรวจพบ: บอทอยู่ผิดห้อง กำลังย้ายกลับ...")
             await vc.move_to(channel)
+            # print(f"🏠 ย้ายกลับเข้าห้อง {channel.name} เรียบร้อย")
     except Exception as e:
-        print(f"⚠️ Voice Error: {e} | Force Reconnecting...")
+        # 🔥 เปลี่ยนจาก pass เป็นระบบสลายเซสชันที่บูดทิ้ง
+        print(f"⚠️ Voice Error: {e} | สั่ง Force Disconnect เพื่อเริ่มใหม่...")
         if vc:
-            try: await vc.disconnect(force=True)
-            except: pass
+            try:
+                await vc.disconnect(force=True)
+            except:
+                pass
 
 @bot.event
 async def on_voice_state_update(member, before, after):
+    # Optional logger (harmless to keep)
     if member.id == bot.user.id and before.channel is not None and after.channel is None:
-        print("ℹ️ บอทหลุดจากห้องเสียง (กำลังรอรอบตรวจถัดไป)")
+        print("ℹ️ บอทหลุดจากห้องเสียง (จะกลับเข้าที่ในรอบตรวจถัดไป)")
 
-# --- [ 4. คำสั่งกลุ่ม !pvr ] ---
+# --- คำสั่งกลุ่ม !pvr ---
 @bot.group(name="pvr", invoke_without_command=True)
 async def pvr(ctx):
+    # ถ้าพิมพ์ !pvr เฉยๆ ให้บอทลบข้อความนั้นทิ้งด้วย จะได้ไม่รก
     if ctx.author.id == 431421372133277698:
         await ctx.message.delete()
+    pass
 
+# --- คำสั่งย่อย !pvr say ---
 @pvr.command(name="say")
 async def say(ctx, *, message: str):
-    if ctx.author.id == 431421372133277698:
-        try:
-            await ctx.message.delete()
-            await ctx.send(message)
-        except: await ctx.send(message)
+    # ID ของคุณที่ได้รับอนุญาต
+    ALLOWED_USER_ID = 431421372133277698
 
+    if ctx.author.id == ALLOWED_USER_ID:
+        try:
+            # 1. 🔥 คำสั่งลบข้อความที่คุณพิมพ์สั่ง (เช่น !pvr say test)
+            await ctx.message.delete()
+
+            # 2. 🎤 บอทส่งข้อความตามที่สั่ง
+            await ctx.send(message)
+
+            print(f"✅ บอทส่งข้อความแทนคุณแล้ว: {message}")
+
+        except Exception as e:
+            # ถ้าลบไม่ได้ (อาจเพราะบอทไม่มีสิทธิ์ Manage Messages) 
+            # ให้บอทส่งข้อความไปก่อน แล้วค่อยแจ้ง Error ในหน้า Log
+            await ctx.send(message)
+            print(f"⚠️ คำเตือน: บอทลบข้อความไม่ได้ เนื่องจาก: {e}")
+    else:
+        # ถ้าไม่ใช่คุณสั่ง บอทจะนิ่งเฉย (และไม่ลบข้อความด้วย เพื่อให้เห็นว่าใครมาเนียน)
+        print(f"🚫 มีคนพยายามสวมรอย: {ctx.author.name} (ID: {ctx.author.id})")
+# --- คำสั่งย่อย !pvr clear [จำนวน] ---
 @pvr.command(name="clear")
 async def clear(ctx, amount: int = 5):
+    # ตรวจสอบ ID คุณคนเดียว
     if ctx.author.id == 431421372133277698:
         try:
+            # ลบข้อความ (บวก 1 เพื่อลบตัวคำสั่งออกไปด้วย)
             deleted = await ctx.channel.purge(limit=amount + 1)
-            await ctx.send(f"🧹 ล้างให้แล้ว {len(deleted)-1} ข้อความ", delete_after=3)
-        except Exception as e: print(f"❌ Clear error: {e}")
+            
+            # ส่งข้อความบอกสถานะ แล้วลบตัวเองทิ้งใน 3 วินาที (ไม่ให้รกแชท)
+            await ctx.send(f"🧹 ล้างประวัติแชทให้แล้ว {len(deleted)-1} ข้อความครับ", delete_after=3)
+            
+            print(f"✅ Clear success: {len(deleted)-1} messages by {ctx.author.name}")
+        except Exception as e:
+            print(f"❌ Clear error: {e}")
 
-# --- [ 5. ระบบ Health Report แบบจัดเต็ม (มาแล้ว!) ] ---
 @bot.command()
 async def status(ctx):
     # 1. คำนวณ Uptime
@@ -86,57 +129,59 @@ async def status(ctx):
     difference = int(round(current_time - start_time))
     text_uptime = str(datetime.timedelta(seconds=difference))
 
-    # 2. อ่านค่า Resource
+    # 2. อ่านค่า RAM
     ram = psutil.virtual_memory()
     swap = psutil.swap_memory()
+    
+    # 3. อ่านค่า Disk และ CPU
     disk = psutil.disk_usage('/')
     cpu = psutil.cpu_percent()
 
+    # 4. สร้างข้อความรายงาน
     report = (
-        f"**📊 Health Report (ฉบับเต็ม)**\n"
+        f"**📊 Health Report**\n"
         f"---"
         f"\n⏱️ **Uptime:** `{text_uptime}`"
         f"\n🏎️ **Bot Latency:** `{round(bot.latency * 1000)}ms`"
         f"\n🖥️ **CPU Usage:** `{cpu}%`"
         f"\n🧠 **RAM:** `{ram.used // (1024**2)}MB` / `{ram.total // (1024**2)}MB`"
         f"\n🔄 **Swap:** `{swap.used // (1024**2)}MB` / `{swap.total // (1024**2)}MB`"
-        f"\n💾 **Disk:** `{disk.percent}% used` (`{disk.free // (1024**3)}GB` free)"
+        f"\n💾 **Disk:** `{disk.percent}% used`"
         f"\n---"
     )
+    
     await ctx.send(report)
 
-# --- [ 6. ระบบ AI ลุงอ๊อด (Gemini Pro) ] ---
-chat_memory = {}
-
-@bot.command(aliases=['ถาม', 'ลุงอ๊อด', 'ood'])
+@bot.command(aliases=['ood'])
 async def ask(ctx, *, question: str):
     async with ctx.typing():
-        channel_id = ctx.channel.id
-        system_prompt = "คุณคือ 'ลุงอ๊อด' อดีตศาสตราจารย์มหาลัย ตอบคำถามด้วยตรรกะระดับสูงและถูกต้องเสมอ แต่แฝงความกวนประสาทแบบคนแก่ใจดี (ภาษาไทยภาคกลาง)"
-        
-        if channel_id not in chat_memory:
-            chat_memory[channel_id] = [
-                {"role": "user", "parts": [{"text": f"คำสั่งระบบ: {system_prompt}"}]},
-                {"role": "model", "parts": [{"text": "รับทราบครับหลาน ลุงอ๊อดร่างทองพร้อมตอบแล้ว!"}]}
-            ]
-        
-        chat_memory[channel_id].append({"role": "user", "parts": [{"text": question}]})
-
         try:
-            # ใช้ model_ai ที่ประกาศไว้ด้านบนสุด
-            response = model_ai.generate_content(chat_memory[channel_id])
-            answer = response.text
+            chat_completion = await groq_client.chat.completions.create(
+                messages=[ # <--- ต้องเริ่มด้วยก้ามปูเปิด
+                    {
+                        "role": "system",
+                        "content": "คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณ นิสัยกวนประสาทแต่ใจดี ต้องตอบเป็นภาษาไทยภาคกลางเท่านั้น ห้ามใช้ภาษาอื่นปนเด็ดขาด ตอบให้เหมือนลุงข้างบ้านที่คุยรู้เรื่องแต่กวนตีน"
+                    },
+                    {
+                        "role": "user",
+                        "content": question,
+                    }
+                ], # <--- ต้องจบด้วยก้ามปูปิด
+                model="llama-3.3-70b-versatile",
+                temperature=0.5,
+                max_tokens=1024,
+            )
             
-            chat_memory[channel_id].append({"role": "model", "parts": [{"text": answer}]})
+            answer = chat_completion.choices[0].message.content
             
-            # เก็บความจำ 10 ข้อความล่าสุด
-            if len(chat_memory[channel_id]) > 10:
-                chat_memory[channel_id] = chat_memory[channel_id][:2] + chat_memory[channel_id][-8:]
-
-            await ctx.send(answer)
+            if len(answer) > 1900:
+                answer = answer[:1900] + "\n\n*(เนื้อหายาวเกินไป ลุงอ๊อดขอตัดจบแค่นี้นะ!)*"
+                
+            await ctx.send(f"{answer}")
             
         except Exception as e:
-            print(f"Error AI: {e}")
-            await ctx.send("⚠️ ลุงอ๊อดมึนหัว (API อาจมีปัญหาหรือโควตาเต็ม) ลองใหม่อีกทีนะหลาน")
+            print(f"Groq Error: {e}")
+            await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบ AI มีปัญหานิดหน่อย ลองใหม่อีกทีนะ")
 
 bot.run(TOKEN)
+
