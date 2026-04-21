@@ -169,7 +169,7 @@ async def ask(ctx, *, question: str):
                         "content": question,
                     }
                 ], # <--- ต้องจบด้วยก้ามปูปิด
-                model="llama-3.3-70b-versatile",
+                model="deepseek-r1-distill-llama-70b",
                 temperature=0.5,
                 max_tokens=1024,
             )
