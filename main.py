@@ -14,6 +14,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 model_ai = genai.GenerativeModel('gemini-1.5-flash')
 
 start_time = time.time()
+TOKEN = os.getenv('DISCORD_TOKEN')
 TARGET_CHANNEL_ID = 1069137562213552128
 
 # --- [ 2. ตั้งค่า Intents (ต้องตั้งก่อนสร้าง bot) ] ---
