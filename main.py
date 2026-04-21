@@ -7,7 +7,7 @@ import psutil
 import time
 import datetime
 from google import genai
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 from groq import AsyncGroq  # ใช้ของ Groq
 
