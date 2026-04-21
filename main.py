@@ -12,6 +12,7 @@ GEMINI_API_KEY = 'AIzaSyB3oay10CoVtJyKUOWUD4hRhQyZy_nI3Vs'
 
 # โค้ดสำหรับเวอร์ชันใหม่ ใช้ Client ในการเชื่อมต่อ
 client = genai.Client(api_key=GEMINI_API_KEY)
+
 # เก็บเวลาที่เริ่มรันบอทไว้คำนวณ Uptime
 start_time = time.time()
 
@@ -159,7 +160,7 @@ async def ask(ctx, *, question: str):
         try:
             # โค้ดเวอร์ชันใหม่ (ใช้ client.aio สำหรับการทำงานแบบ Async ไม่ให้บอทค้าง)
             response = await client.aio.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',
                 contents=question
             )
             
