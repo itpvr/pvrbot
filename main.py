@@ -6,7 +6,7 @@ import asyncio
 import psutil
 import time
 import datetime
-from google import genai
+import google.generativeai as genai
 from ddgs import DDGS
 
 # --- [ 1. Setup Gemini ] ---
@@ -244,7 +244,7 @@ async def ask(ctx, *, question: str):
         except Exception as e:
             print(f"Gemini Error: {e}")
             await ctx.send("ขออภัยครับหลาน สมองลุงเกิดอาการช็อตนิดหน่อย ลองถามใหม่อีกทีนะ")
-            
+
 # --- [ แถม: คำสั่งล้างสมอง ] ---
 @bot.command()
 async def forget(ctx):
