@@ -183,46 +183,44 @@ async def ask(ctx, *, question: str):
     async with ctx.typing():
         channel_id = str(ctx.channel.id)
         
-        # --- 🕒 1. ดึงเวลาปัจจุบัน (ใช้เป็น Reference ในการค้นหา) ---
+        # --- 🕒 1. เวลาปัจจุบัน ---
         now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
         thai_date = now.strftime("%d/%m/%Y")
         thai_time = now.strftime("%H:%M")
         current_info = f"วันนี้วันที่ {thai_date} เวลา {thai_time} น."
 
-        # --- 🔍 2. ระบบค้นหาอัจฉริยะ (Smart Search Trigger) ---
+        # --- 🔍 2. ระบบค้นหา (กรองเฉพาะคำถามที่มีสาระ) ---
         search_context = ""
         
-        # ขยาย Keywords ให้ครอบคลุมทุกการสอบถามข้อมูล
-        # หรือจะเอาออกแล้วสั่งให้ค้นหา "ทุกคำถาม" เลยก็ได้ถ้าหลานไม่กลัวบอทตอบช้า
-        search_triggers = ['คือใคร', 'คืออะไร', 'ราคา', 'ข่าว', 'วันนี้', 'ล่าสุด', 'ที่ไหน', 'เมื่อไหร่', 'ผลบอล', 'อากาศ', 'ทำไม', 'อย่างไร']
+        # รายชื่อคำที่ "ไม่ต้องเสิร์ช" (พวกคำทักทาย)
+        greetings = ['หวัดดี', 'สวัสดี', 'ไฮ', 'hi', 'hello', 'สบายดีไหม', 'ทำไรอยู่']
         
-        # ถ้ามีคำถาม หรือ มีคำที่อยู่ใน triggers ให้ค้นหาทันที
-        if any(word in question for word in search_triggers) or len(question) > 2:
+        # จะเสิร์ชก็ต่อเมื่อ ไม่ใช่คำทักทาย และยาวพอจะเป็นคำถาม
+        is_greeting = any(word in question.lower() for word in greetings)
+        
+        if not is_greeting and len(question) > 3:
             try:
                 with DDGS() as ddgs:
-                    # ใส่ "ล่าสุด" และ "2026" (ปีปัจจุบัน) เข้าไปใน Query เพื่อบีบผลลัพธ์ให้ใหม่ที่สุด
+                    # ค้นหาโดยเน้นข้อมูลสดใหม่
                     search_query = f"{question} ล่าสุด {thai_date}"
-                    results = [r for r in ddgs.text(search_query, max_results=4)]
+                    results = [r for r in ddgs.text(search_query, max_results=3)]
                     
                     if results:
-                        search_context = "\n\n🌐 [ข้อมูลสดจากอินเทอร์เน็ต - ห้ามใช้ความจำเก่าที่ขัดแย้งกับตรงนี้]:\n"
+                        search_context = "\n\n🌐 [ข้อมูลอ้างอิงจากเน็ต]:\n"
                         for res in results:
                             search_context += f"- {res['body']}\n"
-                        
-                        search_context += f"\n(ย้ำ: ข้อมูลนี้เป็นข้อมูลจริงของวันที่ {thai_date} ให้ตอบตามนี้เท่านั้น)"
             except Exception as e:
                 print(f"Search Error: {e}")
 
-        # --- 🧠 3. ปรับ System Instruction ให้ยึดข้อมูลใหม่เป็นสรณะ ---
+        # --- 🧠 3. ปรับสมดุลความคิดลุงอ๊อด ---
         system_instruction = (
-            f"คุณคือ 'ลุงอ๊อด' ข้อมูลปัจจุบันของคุณคือ {current_info} "
-            f"คำสั่งเด็ดขาด: {search_context if search_context else 'ใช้ความรู้ที่คุณมี'} "
-            f"หากข้อมูลใน 'ข้อมูลสดจากอินเทอร์เน็ต' ขัดแย้งกับสิ่งที่คุณเคยจำได้ในอดีต "
-            f"ให้คุณ 'ทิ้ง' ความจำเก่าไปทันที และยึดข้อมูลใหม่มาตอบหลานด้วยท่าทางกวนๆ "
-            f"ตอบเป็นภาษาไทยภาคกลางที่ถูกต้องและชัดเจน"
+            f"คุณคือ 'ลุงอ๊อด' ข้อมูลปัจจุบันคือ {current_info} "
+            f"คำสั่ง: ถ้าหลานแค่ทักทาย ให้ตอบกวนๆ ตามสไตล์คุณโดยไม่ต้องใช้ข้อมูลเน็ตด้านล่าง "
+            f"แต่ถ้าหลานถามข้อมูลเฉพาะเจาะจง ให้ใช้ข้อมูลนี้ประกอบการตอบ: {search_context if search_context else 'ไม่มี'} "
+            f"ห้ามตอบวนซ้ำ ห้ามพ่นข้อมูลที่ไม่เกี่ยวกับคำถามมามั่วๆ "
+            f"ตอบเป็นภาษาไทยภาคกลางกวนๆ แบบลุงข้างบ้าน"
         )
         
-        # อัปเดตความจำบรรทัดแรก (System Role) เสมอ
         if channel_id not in chat_memory:
             chat_memory[channel_id] = [{"role": "system", "content": system_instruction}]
         else:
@@ -235,27 +233,26 @@ async def ask(ctx, *, question: str):
             chat_completion = await groq_client.chat.completions.create(
                 messages=chat_memory[channel_id],
                 model="llama-3.3-70b-versatile",
-                temperature=0.4, # ลดความเพ้อเจ้อลงเพื่อให้ตอบความจริงแม่นขึ้น
-                max_tokens=1024,
+                temperature=0.7, # เพิ่มความยืดหยุ่นให้การตอบทักทาย
+                max_tokens=800,
             )
             
             answer = chat_completion.choices[0].message.content
             chat_memory[channel_id].append({"role": "assistant", "content": answer})
             
-            # คุมความจำ 10 ข้อความ
             if len(chat_memory[channel_id]) > 11:
                 chat_memory[channel_id] = [chat_memory[channel_id][0]] + chat_memory[channel_id][-10:]
 
             save_memory(chat_memory)
             
             if len(answer) > 1900:
-                answer = answer[:1900] + "\n\n*(ยาวจัด ลุงขี้เกียจพิมพ์ต่อ)*"
+                answer = answer[:1900] + "\n\n*(ยาวไป ลุงง่วง)*"
                 
             await ctx.send(answer)
             
         except Exception as e:
             print(f"Groq Error: {e}")
-            await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบค้นหาขัดข้องนิดหน่อยนะหลาน")
+            await ctx.send("⚠️ ลุงมึนหัวนิดหน่อย ลองถามใหม่ซิ")
 # --- [ แถม: คำสั่งล้างสมอง ] ---
 @bot.command()
 async def forget(ctx):
