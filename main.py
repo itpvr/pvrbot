@@ -7,6 +7,7 @@ import psutil
 import time
 import datetime
 from google import genai
+from duckduckgo_search import DDGS
 
 from groq import AsyncGroq  # ใช้ของ Groq
 
@@ -182,65 +183,71 @@ async def ask(ctx, *, question: str):
     async with ctx.typing():
         channel_id = str(ctx.channel.id)
         
-        # --- 🕒 1. จัดการเวลาและวันภาษาไทยให้เป๊ะ ---
+        # --- 🕒 1. จัดการเวลา (เหมือนเดิม) ---
         now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
-        days_thai = {
-            "Monday": "จันทร์", "Tuesday": "อังคาร", "Wednesday": "พุธ",
-            "Thursday": "พฤหัสบดี", "Friday": "ศุกร์", "Saturday": "เสาร์", "Sunday": "อาทิตย์"
-        }
-        day_en = now.strftime("%A")
-        thai_day = days_thai.get(day_en, day_en)
         thai_date = now.strftime("%d/%m/%Y")
         thai_time = now.strftime("%H:%M")
-        
-        # ข้อมูลปัจจุบันที่ยัดใส่หัวลุง
-        current_info = f"วันนี้วัน{thai_day}ที่ {thai_date} เวลา {thai_time} น."
-        
-        # 2. ปรับ System Prompt ให้สติมั่นคงขึ้น
+        current_info = f"วันนี้วันที่ {thai_date} เวลา {thai_time} น."
+
+        # --- 🔍 2. ระบบค้นหาข้อมูลสด (Google-like) ---
+        search_context = ""
+        # ถ้าคำถามมีคำว่า "ราคา", "วันนี้", "คืออะไร", "ข่าว" หรือถามเรื่องเฉพาะทาง
+        # เราจะไปค้นหาข้อมูลจากอินเทอร์เน็ตมาเสริม
+        search_keywords = ['ราคา', 'วันนี้', 'คืออะไร', 'ข่าว', 'ทอง', 'หุ้น', 'อากาศ']
+        if any(keyword in question for keyword in search_keywords):
+            try:
+                with DDGS() as ddgs:
+                    # ค้นหาข้อมูล 3 อันดับแรก
+                    results = [r for r in ddgs.text(f"{question} ภาษาไทย", max_results=3)]
+                    if results:
+                        search_context = "\n\nข้อมูลเพิ่มเติมจากอินเทอร์เน็ต:\n"
+                        for res in results:
+                            search_context += f"- {res['body']}\n"
+            except Exception as e:
+                print(f"Search Error: {e}")
+
+        # 3. ปรับ System Instruction ให้ลุงเอาข้อมูลที่หาได้มาตอบด้วย
         system_instruction = (
-            f"คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณ นิสัยกวนประสาทแต่ใจดี "
-            f"ข้อมูลปัจจุบันของคุณคือ {current_info} (เก็บไว้เป็นข้อมูลส่วนตัว ไม่ต้องบอกออกมาทุกครั้งถ้าไม่จำเป็น) "
-            f"ให้ตอบเป็นภาษาไทยภาคกลางแบบลุงข้างบ้านที่กวนตีน "
-            f"เน้นคุยเรื่องที่หลานถามมาก็พอ ไม่ต้องรายงานเวลาทุกรอบ ยกเว้นหลานจะถามว่ากี่โมงแล้ว"
+            f"คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณ กวนประสาทแต่รอบรู้ "
+            f"ข้อมูลปัจจุบันของคุณคือ {current_info} {search_context} "
+            f"ถ้ามีข้อมูลเพิ่มเติมจากอินเทอร์เน็ตให้สรุปมาตอบด้วยท่าทางกวนๆ "
+            f"ตอบเป็นภาษาไทยภาคกลางเท่านั้น"
         )
         
+        # อัปเดตความจำ (เหมือนเดิม)
         if channel_id not in chat_memory:
             chat_memory[channel_id] = [{"role": "system", "content": system_instruction}]
         else:
-            # อัปเดตข้อมูลเวลาล่าสุดในความจำบรรทัดแรกเสมอ
             chat_memory[channel_id][0]["content"] = system_instruction
 
         chat_memory[channel_id].append({"role": "user", "content": question})
 
         try:
-            # 3. เรียก Groq (ปรับ temperature ให้พอดี)
+            # 4. เรียก Groq (ใช้ความจำที่รวมข้อมูลใหม่แล้ว)
             chat_completion = await groq_client.chat.completions.create(
                 messages=chat_memory[channel_id],
                 model="llama-3.3-70b-versatile",
-                temperature=0.6, 
-                max_tokens=800, # ลดลงนิดนึงกันมันพ่นยาวเกิน
-                top_p=0.9,      # ช่วยให้คำที่เลือกมีความหลากหลายแต่ไม่มั่ว
+                temperature=0.6,
+                max_tokens=1024,
             )
             
             answer = chat_completion.choices[0].message.content
-            
-            # กันเหนียว: ถ้า AI ยังส่งอะไรวนๆ มา (เช่น มีคำซ้ำกันเกินไป) ให้ตัดจบ
             chat_memory[channel_id].append({"role": "assistant", "content": answer})
             
+            # คุมขนาดสมอง (เหมือนเดิม)
             if len(chat_memory[channel_id]) > 11:
                 chat_memory[channel_id] = [chat_memory[channel_id][0]] + chat_memory[channel_id][-10:]
 
             save_memory(chat_memory)
             
             if len(answer) > 1900:
-                answer = answer[:1900] + "\n\n*(ลุงอ๊อดเริ่มง่วง ขอตัดจบแค่นี้นะ!)*"
+                answer = answer[:1900] + "\n\n*(ยาวไป ลุงขี้เกียจพิมพ์แล้ว)*"
                 
             await ctx.send(answer)
             
         except Exception as e:
             print(f"Groq Error: {e}")
-            await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบ AI มีปัญหานิดหน่อย")
-
+            await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบค้นหาล่มหรือ AI มีปัญหา")
 # --- [ แถม: คำสั่งล้างสมอง ] ---
 @bot.command()
 async def forget(ctx):
