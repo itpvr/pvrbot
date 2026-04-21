@@ -5,17 +5,17 @@ import asyncio
 import psutil
 import time
 import datetime
-from google import genai
 
-# ใส่ API Key ของคุณ
-GEMINI_API_KEY = 'AIzaSyB3oay10CoVtJyKUOWUD4hRhQyZy_nI3Vs'
+from groq import AsyncGroq  # ใช้ของ Groq
 
-# โค้ดสำหรับเวอร์ชันใหม่ ใช้ Client ในการเชื่อมต่อ
-client = genai.Client(api_key=GEMINI_API_KEY)
+GROQ_API_KEY = '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'
 
-# เก็บเวลาที่เริ่มรันบอทไว้คำนวณ Uptime
+# เปิดการเชื่อมต่อ
+groq_client = AsyncGroq(api_key=GROQ_API_KEY)
+
+
+
 start_time = time.time()
-
 # --- ตั้งค่าพื้นฐาน (เหมือนเดิม) ---
 TOKEN = os.getenv('DISCORD_TOKEN')
 TARGET_CHANNEL_ID = 1069137562213552128
@@ -158,22 +158,33 @@ async def status(ctx):
 async def ask(ctx, *, question: str):
     async with ctx.typing():
         try:
-            # โค้ดเวอร์ชันใหม่ (ใช้ client.aio สำหรับการทำงานแบบ Async ไม่ให้บอทค้าง)
-            response = await client.aio.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=question
+            # ใช้ Llama 3.3 ตัวท็อปสุด ฟรีและเร็วมาก
+            chat_completion = await groq_client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "คุณคือ 'ลุงอ๊อด' บอทดิสคอร์ดสูงวัยสุดเก๋า ใจดี แต่มีความกวนนิดๆ ชอบตอบสั้นๆ กระชับ และตอบเป็นภาษาไทยเสมอ"
+                    },
+                    {
+                        "role": "user",
+                        "content": question,
+                    }
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.7,
+                max_tokens=1024,
             )
             
-            answer = response.text
+            answer = chat_completion.choices[0].message.content
             
-            # ดักข้อความยาวเกิน 2,000 ตัวอักษร
             if len(answer) > 1900:
                 answer = answer[:1900] + "\n\n*(เนื้อหายาวเกินไป ลุงอ๊อดขอตัดจบแค่นี้นะ!)*"
                 
-            await ctx.send(f"{answer}")
+            await ctx.send(f"🧠 **ลุงอ๊อดตอบ:**\n{answer}")
             
         except Exception as e:
-            print(f"Gemini Error: {e}")
-            await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบ AI มีปัญหานิดหน่อย ลองใหม่อีกทีนะ")
+            print(f"Groq Error: {e}")
+            await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบเซิร์ฟเวอร์ขัดข้องนิดหน่อย ลองใหม่อีกทีนะ")
+            
 bot.run(TOKEN)
 
