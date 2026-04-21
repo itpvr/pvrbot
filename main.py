@@ -171,22 +171,20 @@ async def ask(ctx, *, question: str):
         chat_memory[channel_id].append({"role": "user", "parts": [{"text": question}]})
 
         try:
-            # เรียกใช้ Gemini 1.5 Pro (รุ่นฉลาดมาก)
-            # หมายเหตุ: ในไลบรารีใหม่ใช้ gemini-1.5-pro หรือ gemini-2.0-flash-exp (ตัวแรง)
+            # 1. ใช้ชื่อรุ่น gemini-1.5-flash (ตัด models/ ออก)
+            # และใช้คำสั่งแบบ Synchronous ให้ถูกตามหลัก SDK ใหม่
             response = client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-1.5-flash', 
                 contents=chat_memory[channel_id]
             )
             
+            # 2. ดึงข้อความออกมา (SDK ใหม่ใช้ .text ได้เลย)
             answer = response.text
             
-            # เก็บคำตอบลงความจำ
+            # 3. บันทึกคำตอบลงความจำ (ใช้ role: 'model' ถูกต้องแล้ว)
             chat_memory[channel_id].append({"role": "model", "parts": [{"text": answer}]})
             
-            # ควบคุมขนาดความจำ (เก็บไว้ 10 ข้อความล่าสุด)
-            if len(chat_memory[channel_id]) > 10:
-                chat_memory[channel_id] = chat_memory[channel_id][:2] + chat_memory[channel_id][-8:]
-
+            # 4. ลุงส่งคำตอบกลับ
             await ctx.send(f"{answer}")
             
         except Exception as e:
