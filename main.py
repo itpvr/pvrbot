@@ -182,53 +182,60 @@ async def ask(ctx, *, question: str):
     async with ctx.typing():
         channel_id = str(ctx.channel.id)
         
-        # --- 🕒 1. ดึงเวลาปัจจุบัน (เวลาไทย UTC+7) ---
+        # --- 🕒 1. จัดการเวลาและวันภาษาไทยให้เป๊ะ ---
         now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
+        days_thai = {
+            "Monday": "จันทร์", "Tuesday": "อังคาร", "Wednesday": "พุธ",
+            "Thursday": "พฤหัสบดี", "Friday": "ศุกร์", "Saturday": "เสาร์", "Sunday": "อาทิตย์"
+        }
+        day_en = now.strftime("%A")
+        thai_day = days_thai.get(day_en, day_en)
         thai_date = now.strftime("%d/%m/%Y")
         thai_time = now.strftime("%H:%M")
-        thai_day = now.strftime("%A") # วันอังคาร, วันพุธ...
         
-        # สร้างข้อมูลเวลาปัจจุบันเพื่อเตือนสติลุงอ๊อด
-        time_context = f" (ข้อมูลปัจจุบัน: วันนี้คือ{thai_day}ที่ {thai_date} เวลา {thai_time} น.)"
+        # ข้อมูลปัจจุบันที่ยัดใส่หัวลุง
+        current_info = f"วันนี้วัน{thai_day}ที่ {thai_date} เวลา {thai_time} น."
         
-        # 2. ตั้งค่าระบบ (ถ้ายังไม่เคยคุยกัน)
+        # 2. ปรับ System Prompt ให้สติมั่นคงขึ้น
+        system_instruction = (
+            f"คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณ นิสัยกวนประสาทแต่จริงใจ "
+            f"ตอนนี้คือเวลา {current_info} (จดจำไว้ให้ดีและตอบให้ตรง) "
+            f"ตอบเป็นภาษาไทยภาคกลางที่กวนตีนแต่ห้ามตอบวนซ้ำ ห้ามพูดจาวนไปวนมา "
+            f"ถ้าถูกถามเรื่องวันเวลา ให้ตอบสั้นๆ กวนๆ แต่ต้องถูกต้อง"
+        )
+        
         if channel_id not in chat_memory:
-            chat_memory[channel_id] = [
-                {
-                    "role": "system",
-                    "content": f"คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณ นิสัยกวนประสาทแต่ใจดี ตอบเป็นภาษาไทยภาคกลางเท่านั้น ตอบให้เหมือนลุงข้างบ้านที่กวนตีนแต่รู้จริง ข้อมูลปัจจุบันของลุงคือ {time_context}"
-                }
-            ]
+            chat_memory[channel_id] = [{"role": "system", "content": system_instruction}]
         else:
-            # 🔄 อัปเดตเวลาปัจจุบันใน "ความจำแรก" ของลุงเสมอ เพื่อให้ลุงไม่อัลไซเมอร์เรื่องเวลา
-            chat_memory[channel_id][0]["content"] = f"คุณคือ 'ลุงอ๊อด' ... ข้อมูลปัจจุบันของลุงคือ {time_context}"
+            # อัปเดตข้อมูลเวลาล่าสุดในความจำบรรทัดแรกเสมอ
+            chat_memory[channel_id][0]["content"] = system_instruction
 
-        # 3. จดคำถามของหลาน (ใส่เวลาลงไปด้วยนิดนึงกันลุงมึน)
         chat_memory[channel_id].append({"role": "user", "content": question})
 
         try:
-            # 4. ส่งให้ Groq
+            # 3. เรียก Groq (ปรับ temperature ให้พอดี)
             chat_completion = await groq_client.chat.completions.create(
                 messages=chat_memory[channel_id],
                 model="llama-3.3-70b-versatile",
-                temperature=0.7, # เพิ่มความแม่นยำ ลดความมั่ว
-                max_tokens=1024,
+                temperature=0.6, 
+                max_tokens=800, # ลดลงนิดนึงกันมันพ่นยาวเกิน
+                top_p=0.9,      # ช่วยให้คำที่เลือกมีความหลากหลายแต่ไม่มั่ว
             )
             
             answer = chat_completion.choices[0].message.content
+            
+            # กันเหนียว: ถ้า AI ยังส่งอะไรวนๆ มา (เช่น มีคำซ้ำกันเกินไป) ให้ตัดจบ
             chat_memory[channel_id].append({"role": "assistant", "content": answer})
             
-            # คุมขนาดสมอง
             if len(chat_memory[channel_id]) > 11:
                 chat_memory[channel_id] = [chat_memory[channel_id][0]] + chat_memory[channel_id][-10:]
 
-            # บันทึกลง Disk
             save_memory(chat_memory)
             
             if len(answer) > 1900:
-                answer = answer[:1900] + "\n\n*(เนื้อหายาวเกินไป ลุงอ๊อดขอตัดจบ!)*"
+                answer = answer[:1900] + "\n\n*(ลุงอ๊อดเริ่มง่วง ขอตัดจบแค่นี้นะ!)*"
                 
-            await ctx.send(f"{answer}")
+            await ctx.send(answer)
             
         except Exception as e:
             print(f"Groq Error: {e}")
