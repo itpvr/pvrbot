@@ -5,15 +5,13 @@ import asyncio
 import psutil
 import time
 import datetime
-import google.generativeai as genai
+from google import genai
 
-# เอา API Key ที่ก๊อปมา วางแทนข้อความภาษาไทยข้างล่างนี้ (อย่าลบเครื่องหมาย ' ')
+# ใส่ API Key ของคุณ
 GEMINI_API_KEY = 'AIzaSyB3oay10CoVtJyKUOWUD4hRhQyZy_nI3Vs'
-genai.configure(api_key=GEMINI_API_KEY)
 
-# เลือกรุ่น 1.5 Flash เพราะฟรี กินแรมน้อย และตอบไวสุดๆ
-model = genai.GenerativeModel('gemini-1.5-flash')
-
+# โค้ดสำหรับเวอร์ชันใหม่ ใช้ Client ในการเชื่อมต่อ
+client = genai.Client(api_key=GEMINI_API_KEY)
 # เก็บเวลาที่เริ่มรันบอทไว้คำนวณ Uptime
 start_time = time.time()
 
@@ -157,14 +155,17 @@ async def status(ctx):
 
 @bot.command(aliases=['ถาม', 'ลุงอ๊อด'])
 async def ask(ctx, *, question: str):
-    # สั่งให้ขึ้นสถานะ "กำลังพิมพ์..." ระหว่างที่บอทกำลังคิด
     async with ctx.typing():
         try:
-            # ส่งคำถามไปให้ Gemini ประมวลผล (แบบไม่ให้คิวเครื่องค้าง)
-            response = await model.generate_content_async(question)
+            # โค้ดเวอร์ชันใหม่ (ใช้ client.aio สำหรับการทำงานแบบ Async ไม่ให้บอทค้าง)
+            response = await client.aio.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=question
+            )
+            
             answer = response.text
             
-            # ดักไว้ก่อน: Discord ห้ามพิมพ์เกิน 2,000 ตัวอักษรต่อ 1 ข้อความ
+            # ดักข้อความยาวเกิน 2,000 ตัวอักษร
             if len(answer) > 1900:
                 answer = answer[:1900] + "\n\n*(เนื้อหายาวเกินไป ลุงอ๊อดขอตัดจบแค่นี้นะ!)*"
                 
@@ -172,6 +173,6 @@ async def ask(ctx, *, question: str):
             
         except Exception as e:
             print(f"Gemini Error: {e}")
-            await ctx.send("⚠️ ลุงอ๊อดมึนหัว คิดไม่ออกครับตอนนี้ ลองถามใหม่อีกทีนะ")
+            await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบ AI มีปัญหานิดหน่อย ลองใหม่อีกทีนะ")
 bot.run(TOKEN)
 
