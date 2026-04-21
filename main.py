@@ -151,7 +151,6 @@ async def status(ctx):
     )
     
     await ctx.send(report)
-    
 chat_memory = {}
 @bot.command(aliases=['ถาม', 'ลุงอ๊อด', 'ood'])
 async def ask(ctx, *, question: str):
@@ -175,7 +174,7 @@ async def ask(ctx, *, question: str):
             # เรียกใช้ Gemini 1.5 Pro (รุ่นฉลาดมาก)
             # หมายเหตุ: ในไลบรารีใหม่ใช้ gemini-1.5-pro หรือ gemini-2.0-flash-exp (ตัวแรง)
             response = client.models.generate_content(
-                model='gemini-2.0-flash-exp'
+                model='gemini-2.0-flash-exp',
                 contents=chat_memory[channel_id]
             )
             
