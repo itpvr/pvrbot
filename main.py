@@ -5,13 +5,11 @@ import asyncio
 import psutil
 import time
 import datetime
+from google import genai
 
-from groq import AsyncGroq  # ใช้ของ Groq
+GEMINI_API_KEY = 'AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM'
+client = genai.Client(api_key=GEMINI_API_KEY)
 
-GROQ_API_KEY = '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'
-
-# เปิดการเชื่อมต่อ
-groq_client = AsyncGroq(api_key=GROQ_API_KEY)
 
 
 
@@ -154,36 +152,45 @@ async def status(ctx):
     
     await ctx.send(report)
 
-@bot.command(aliases=['ood'])
+@bot.command(aliases=['ถาม', 'ลุงอ๊อด', 'ood'])
 async def ask(ctx, *, question: str):
     async with ctx.typing():
+        channel_id = ctx.channel.id
+        
+        # ตั้งค่าบุคลิก (System Instruction)
+        system_prompt = "คุณคือ 'ลุงอ๊อด' อดีตศาสตราจารย์มหาลัย นิสัยกวนประสาทแต่ใจดี ตอบคำถามด้วยตรรกะระดับสูงและถูกต้องเสมอ (ใช้ภาษาไทยภาคกลาง)"
+        
+        # จัดการความจำ
+        if channel_id not in chat_memory:
+            chat_memory[channel_id] = [
+                {"role": "user", "parts": [{"text": f"คำสั่งระบบ: {system_prompt}"}]},
+                {"role": "model", "parts": [{"text": "รับทราบครับหลาน ลุงอ๊อดพร้อมตอบแบบจัดเต็มแล้ว!"}]}
+            ]
+        
+        # เพิ่มคำถามใหม่ลงไป
+        chat_memory[channel_id].append({"role": "user", "parts": [{"text": question}]})
+
         try:
-            chat_completion = await groq_client.chat.completions.create(
-                messages=[ # <--- ต้องเริ่มด้วยก้ามปูเปิด
-                    {
-                        "role": "system",
-                        "content": "คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณ นิสัยกวนประสาทแต่ใจดี ต้องตอบเป็นภาษาไทยภาคกลางเท่านั้น ห้ามใช้ภาษาอื่นปนเด็ดขาด ตอบให้เหมือนลุงข้างบ้านที่คุยรู้เรื่องแต่กวนตีน"
-                    },
-                    {
-                        "role": "user",
-                        "content": question,
-                    }
-                ], # <--- ต้องจบด้วยก้ามปูปิด
-                model="llama-3.3-70b-versatile",
-                temperature=0.5,
-                max_tokens=1024,
+            # เรียกใช้ Gemini 1.5 Pro (รุ่นฉลาดมาก)
+            # หมายเหตุ: ในไลบรารีใหม่ใช้ gemini-1.5-pro หรือ gemini-2.0-flash-exp (ตัวแรง)
+            response = client.models.generate_content(
+                model='gemini-1.5-pro',
+                contents=chat_memory[channel_id]
             )
             
-            answer = chat_completion.choices[0].message.content
+            answer = response.text
             
-            if len(answer) > 1900:
-                answer = answer[:1900] + "\n\n*(เนื้อหายาวเกินไป ลุงอ๊อดขอตัดจบแค่นี้นะ!)*"
-                
+            # เก็บคำตอบลงความจำ
+            chat_memory[channel_id].append({"role": "model", "parts": [{"text": answer}]})
+            
+            # ควบคุมขนาดความจำ (เก็บไว้ 10 ข้อความล่าสุด)
+            if len(chat_memory[channel_id]) > 10:
+                chat_memory[channel_id] = chat_memory[channel_id][:2] + chat_memory[channel_id][-8:]
+
             await ctx.send(f"{answer}")
             
         except Exception as e:
-            print(f"Groq Error: {e}")
-            await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบ AI มีปัญหานิดหน่อย ลองใหม่อีกทีนะ")
-
+            print(f"Error: {e}")
+            await ctx.send("⚠️ ลุงอ๊อดมึนหัวนิดหน่อย (อาจจะโดนจำกัดจำนวนครั้ง หรือ API มีปัญหา)")
 bot.run(TOKEN)
 
