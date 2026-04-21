@@ -180,51 +180,59 @@ chat_memory = load_memory()
 @bot.command(aliases=['ood'])
 async def ask(ctx, *, question: str):
     async with ctx.typing():
-        # 1. ระบุ ID ห้องคุย (ใช้ string เพื่อให้เซฟลง JSON ได้)
         channel_id = str(ctx.channel.id)
         
-        # 2. ตั้งค่าระบบ (ถ้ายังไม่เคยคุยกันในห้องนี้)
+        # --- 🕒 1. ดึงเวลาปัจจุบัน (เวลาไทย UTC+7) ---
+        now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
+        thai_date = now.strftime("%d/%m/%Y")
+        thai_time = now.strftime("%H:%M")
+        thai_day = now.strftime("%A") # วันอังคาร, วันพุธ...
+        
+        # สร้างข้อมูลเวลาปัจจุบันเพื่อเตือนสติลุงอ๊อด
+        time_context = f" (ข้อมูลปัจจุบัน: วันนี้คือ{thai_day}ที่ {thai_date} เวลา {thai_time} น.)"
+        
+        # 2. ตั้งค่าระบบ (ถ้ายังไม่เคยคุยกัน)
         if channel_id not in chat_memory:
             chat_memory[channel_id] = [
                 {
                     "role": "system",
-                    "content": "คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณ นิสัยกวนประสาทแต่ใจดี ต้องตอบเป็นภาษาไทยภาคกลางเท่านั้น ห้ามใช้ภาษาอื่นปนเด็ดขาด ตอบให้เหมือนลุงข้างบ้านที่คุยรู้เรื่องแต่กวนตีน"
+                    "content": f"คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณ นิสัยกวนประสาทแต่ใจดี ตอบเป็นภาษาไทยภาคกลางเท่านั้น ตอบให้เหมือนลุงข้างบ้านที่กวนตีนแต่รู้จริง ข้อมูลปัจจุบันของลุงคือ {time_context}"
                 }
             ]
-        
-        # 3. จดคำถามของหลานลงสมุด
+        else:
+            # 🔄 อัปเดตเวลาปัจจุบันใน "ความจำแรก" ของลุงเสมอ เพื่อให้ลุงไม่อัลไซเมอร์เรื่องเวลา
+            chat_memory[channel_id][0]["content"] = f"คุณคือ 'ลุงอ๊อด' ... ข้อมูลปัจจุบันของลุงคือ {time_context}"
+
+        # 3. จดคำถามของหลาน (ใส่เวลาลงไปด้วยนิดนึงกันลุงมึน)
         chat_memory[channel_id].append({"role": "user", "content": question})
 
         try:
-            # 4. ส่งสมุดจดทั้งหมดให้ Groq วิเคราะห์ (เพื่อให้จำสิ่งที่คุยก่อนหน้าได้)
+            # 4. ส่งให้ Groq
             chat_completion = await groq_client.chat.completions.create(
                 messages=chat_memory[channel_id],
                 model="llama-3.3-70b-versatile",
-                temperature=0.5,
+                temperature=0.7, # เพิ่มความแม่นยำ ลดความมั่ว
                 max_tokens=1024,
             )
             
             answer = chat_completion.choices[0].message.content
-            
-            # 5. จดคำตอบของลุงลงสมุดด้วย
             chat_memory[channel_id].append({"role": "assistant", "content": answer})
             
-            # 6. คุมขนาดสมอง (จำย้อนหลัง 10 ข้อความล่าสุด เพื่อไม่ให้แรมเต็ม)
+            # คุมขนาดสมอง
             if len(chat_memory[channel_id]) > 11:
                 chat_memory[channel_id] = [chat_memory[channel_id][0]] + chat_memory[channel_id][-10:]
 
-            # 7. 🔥 บันทึกลง Disk ทันที! (กันลืมตอนปิดบอท)
+            # บันทึกลง Disk
             save_memory(chat_memory)
             
-            # ตัดคำถ้าคำตอบยาวเกินไปตามที่หลานเขียนไว้
             if len(answer) > 1900:
-                answer = answer[:1900] + "\n\n*(เนื้อหายาวเกินไป ลุงอ๊อดขอตัดจบแค่นี้นะ!)*"
+                answer = answer[:1900] + "\n\n*(เนื้อหายาวเกินไป ลุงอ๊อดขอตัดจบ!)*"
                 
             await ctx.send(f"{answer}")
             
         except Exception as e:
             print(f"Groq Error: {e}")
-            await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบ AI มีปัญหานิดหน่อย ลองใหม่อีกทีนะ")
+            await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบ AI มีปัญหานิดหน่อย")
 
 # --- [ แถม: คำสั่งล้างสมอง ] ---
 @bot.command()
