@@ -178,47 +178,52 @@ def save_memory(data):
 # โหลดความจำขึ้นมาเก็บไว้ในตัวแปรทันทีที่เปิดบอท
 chat_memory = load_memory()
 
-@bot.command(aliases=['ood'])
+import datetime
+from ddgs import DDGS
+
+# --- [ 1. ฟังก์ชันค้นหาข้อมูลเชิงลึก ] ---
+async def deep_search(query):
+    try:
+        with DDGS() as ddgs:
+            # เพิ่มคำสำคัญเพื่อให้ผลลัพธ์แม่นยำและเป็นปัจจุบันที่สุด
+            refined_query = f"{query} ล่าสุด วันนี้"
+            results = [r for r in ddgs.text(refined_query, max_results=5)]
+            
+            if not results:
+                return "ไม่พบข้อมูลที่แน่ชัดจากแหล่งข่าวออนไลน์"
+            
+            context = "ข้อมูลสรุปจากอินเทอร์เน็ต:\n"
+            for res in results:
+                context += f"- {res['body']}\n"
+            return context
+    except Exception as e:
+        return f"เกิดข้อผิดพลาดในการเข้าถึงข้อมูล: {e}"
+
+# --- [ 2. คำสั่ง !ask / !ood แบบ Gemini Style ] ---
+@bot.command(aliases=['ood', 'ถาม'])
 async def ask(ctx, *, question: str):
     async with ctx.typing():
         channel_id = str(ctx.channel.id)
         
-        # --- 🕒 1. เวลาปัจจุบัน ---
+        # ดึงเวลาปัจจุบัน (สำคัญมากสำหรับการเช็คราคาและข่าว)
         now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
         thai_date = now.strftime("%d/%m/%Y")
         thai_time = now.strftime("%H:%M")
-        current_info = f"วันนี้วันที่ {thai_date} เวลา {thai_time} น."
+        
+        # 🔍 ดำเนินการค้นหาข้อมูลจากอินเทอร์เน็ต
+        # เราจะค้นหาทุกครั้งที่ถาม เพื่อให้ได้ข้อมูล Real-time
+        search_data = await deep_search(question)
 
-        # --- 🔍 2. ระบบค้นหา (กรองเฉพาะคำถามที่มีสาระ) ---
-        search_context = ""
-        
-        # รายชื่อคำที่ "ไม่ต้องเสิร์ช" (พวกคำทักทาย)
-        greetings = ['หวัดดี', 'สวัสดี', 'ไฮ', 'hi', 'hello', 'สบายดีไหม', 'ทำไรอยู่']
-        
-        # จะเสิร์ชก็ต่อเมื่อ ไม่ใช่คำทักทาย และยาวพอจะเป็นคำถาม
-        is_greeting = any(word in question.lower() for word in greetings)
-        
-        if not is_greeting and len(question) > 3:
-            try:
-                with DDGS() as ddgs:
-                    # ค้นหาโดยเน้นข้อมูลสดใหม่
-                    search_query = f"{question} ล่าสุด {thai_date}"
-                    results = [r for r in ddgs.text(search_query, max_results=3)]
-                    
-                    if results:
-                        search_context = "\n\n🌐 [ข้อมูลอ้างอิงจากเน็ต]:\n"
-                        for res in results:
-                            search_context += f"- {res['body']}\n"
-            except Exception as e:
-                print(f"Search Error: {e}")
-
-        # --- 🧠 3. ปรับสมดุลความคิดลุงอ๊อด ---
+        # 🧠 ปรับ System Prompt ให้สุภาพ มีโครงสร้าง และเป็นกลางแบบ Gemini
         system_instruction = (
-            f"คุณคือ 'ลุงอ๊อด' ข้อมูลปัจจุบันคือ {current_info} "
-            f"คำสั่ง: ถ้าหลานแค่ทักทาย ให้ตอบกวนๆ ตามสไตล์คุณโดยไม่ต้องใช้ข้อมูลเน็ตด้านล่าง "
-            f"แต่ถ้าหลานถามข้อมูลเฉพาะเจาะจง ให้ใช้ข้อมูลนี้ประกอบการตอบ: {search_context if search_context else 'ไม่มี'} "
-            f"ห้ามตอบวนซ้ำ ห้ามพ่นข้อมูลที่ไม่เกี่ยวกับคำถามมามั่วๆ "
-            f"ตอบเป็นภาษาไทยภาคกลางกวนๆ แบบลุงข้างบ้าน"
+            f"คุณคือผู้ช่วย AI อัจฉริยะนามว่า 'ลุงอ๊อด' (เวอร์ชันสุภาพ) "
+            f"ข้อมูลปัจจุบันของคุณคือ วันที่ {thai_date} เวลา {thai_time} น. "
+            f"คำแนะนำในการตอบ:\n"
+            f"1. ใช้ภาษาไทยภาคกลางที่สุภาพ เป็นทางการแต่เป็นกันเอง\n"
+            f"2. หากเป็นข้อมูลข่าวสาร หุ้น หรือราคาทอง ให้ใช้ข้อมูลจากเน็ตด้านล่างนี้ประกอบการสรุปเสมอ\n"
+            f"3. จัดรูปแบบคำตอบให้สวยงาม ใช้ตัวหนา (bold) และรายการแบบจุด (bullet points) เพื่อให้อ่านง่าย\n"
+            f"4. หากข้อมูลไม่ชัดเจน ให้ระบุแหล่งที่มาหรือแนะนำให้ตรวจสอบจากแหล่งทางการอีกครั้ง\n"
+            f"5. ข้อมูลที่คุณค้นพบมาได้คือ: {search_data}"
         )
         
         if channel_id not in chat_memory:
@@ -229,30 +234,35 @@ async def ask(ctx, *, question: str):
         chat_memory[channel_id].append({"role": "user", "content": question})
 
         try:
-            # 4. เรียก Groq
+            # เรียกใช้โมเดลท็อปสุดของ Groq (Llama 3.3 70B)
             chat_completion = await groq_client.chat.completions.create(
                 messages=chat_memory[channel_id],
                 model="llama-3.3-70b-versatile",
-                temperature=0.7, # เพิ่มความยืดหยุ่นให้การตอบทักทาย
-                max_tokens=800,
+                temperature=0.3, # ลด Temp ลงเพื่อให้คำตอบนิ่งและแม่นยำที่สุด
+                max_tokens=1500,
             )
             
             answer = chat_completion.choices[0].message.content
             chat_memory[channel_id].append({"role": "assistant", "content": answer})
             
+            # เก็บความจำ 10 ข้อความ
             if len(chat_memory[channel_id]) > 11:
                 chat_memory[channel_id] = [chat_memory[channel_id][0]] + chat_memory[channel_id][-10:]
 
             save_memory(chat_memory)
             
-            if len(answer) > 1900:
-                answer = answer[:1900] + "\n\n*(ยาวไป ลุงง่วง)*"
-                
-            await ctx.send(answer)
+            # จัดการความยาวข้อความ Discord
+            if len(answer) > 1950:
+                # แบ่งส่งถ้าข้อความยาวเกินไป
+                parts = [answer[i:i+1950] for i in range(0, len(answer), 1950)]
+                for part in parts:
+                    await ctx.send(part)
+            else:
+                await ctx.send(answer)
             
         except Exception as e:
-            print(f"Groq Error: {e}")
-            await ctx.send("⚠️ ลุงมึนหัวนิดหน่อย ลองถามใหม่ซิ")
+            print(f"Error: {e}")
+            await ctx.send("ขออภัยครับ ขณะนี้ระบบประมวลผลข้อมูลขัดข้อง กรุณาลองใหม่อีกครั้งในภายหลังครับ")
 # --- [ แถม: คำสั่งล้างสมอง ] ---
 @bot.command()
 async def forget(ctx):
