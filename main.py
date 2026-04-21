@@ -151,7 +151,8 @@ async def status(ctx):
     )
     
     await ctx.send(report)
-
+    
+chat_memory = {}
 @bot.command(aliases=['ถาม', 'ลุงอ๊อด', 'ood'])
 async def ask(ctx, *, question: str):
     async with ctx.typing():
