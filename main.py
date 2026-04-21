@@ -217,9 +217,26 @@ async def ask(ctx, *, question: str):
         )
 
         try:
-            # 🚀 Step 3: ส่งให้ Gemini ประมวลผล
-            # Gemini เก่งเรื่องการอ่าน Context ยาวๆ ดังนั้นส่ง Search ไปเยอะๆ ได้เลย
-            response = model.generate_content(prompt_context)
+            # 🚀 เปลี่ยนมาใช้รุ่น ASYNC (generate_content_async)
+            # เพื่อไม่ให้บอทหยุดทำงานขณะรอคำตอบ
+            safety_settings = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
+
+            # ✨ หัวใจสำคัญคือเติมคำว่า _async และ await ครับ
+            response = await model.generate_content_async(
+                prompt_context,
+                safety_settings=safety_settings,
+                request_options={'timeout': 60}
+            )
+
+            if not response.candidates or not response.candidates[0].content.parts:
+                await ctx.send("📋 ข้อมูลนี้ลุงขอผ่านนะหลาน ระบบมันกรองทิ้ง (หรือลองถามใหม่ซิ)")
+                return
+
             answer = response.text
 
             # บันทึกความจำ (แบบง่าย)
