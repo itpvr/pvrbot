@@ -9,13 +9,12 @@ import datetime
 from google import genai
 from ddgs import DDGS
 
-from groq import AsyncGroq  # ใช้ของ Groq
+# --- [ 1. Setup Gemini ] ---
+GEMINI_API_KEY = 'AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM'
+genai.configure(api_key=GEMINI_API_KEY)
 
-GROQ_API_KEY = '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'
-
-# เปิดการเชื่อมต่อ
-groq_client = AsyncGroq(api_key=GROQ_API_KEY)
-
+# ใช้ชื่อรุ่นนี้ ชัวร์ที่สุดในตอนนี้ครับ
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 
 start_time = time.time()
@@ -178,91 +177,74 @@ def save_memory(data):
 # โหลดความจำขึ้นมาเก็บไว้ในตัวแปรทันทีที่เปิดบอท
 chat_memory = load_memory()
 
-import datetime
-from ddgs import DDGS
-
-async def deep_search(query):
+async def pro_search(query):
     try:
         with DDGS() as ddgs:
-            # เพิ่มแหล่งอ้างอิงที่เชื่อถือได้ เช่น Yahoo Finance, Google Finance, Investing
-            refined_query = f"{query} price stock yahoo financeล่าสุด"
-            results = [r for r in ddgs.text(refined_query, max_results=4)]
+            # เพิ่มการค้นหาที่เจาะจงปีปัจจุบัน 2026
+            refined_query = f"{query} ข้อมูลล่าสุดปี 2026"
+            results = [r for r in ddgs.text(refined_query, max_results=5)]
             
-            if not results: return "ไม่พบข้อมูลสด"
+            if not results: return "ไม่พบข้อมูลใหม่ในอินเทอร์เน็ต"
             
-            context = "⚠️ ข้อมูลดิบจากเน็ต (โปรดตรวจสอบวันที่ในวงเล็บ):\n"
+            context = "⚠️ ข้อมูลสดจากอินเทอร์เน็ต (Real-time Data 2026):\n"
             for res in results:
-                # พยายามดึงข้อมูลมาให้ AI วิเคราะห์
                 context += f"- {res['body']}\n"
             return context
     except Exception as e:
-        return f"Error: {e}"
+        return f"ระบบค้นหาขัดข้อง: {e}"
 
-# --- [ 2. คำสั่ง !ask / !ood แบบ Gemini Style ] ---
 @bot.command(aliases=['ood', 'ถาม'])
 async def ask(ctx, *, question: str):
     async with ctx.typing():
         channel_id = str(ctx.channel.id)
-        
-        # ดึงเวลาปัจจุบัน (สำคัญมากสำหรับการเช็คราคาและข่าว)
         now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
-        thai_date = now.strftime("%d/%m/%Y")
-        thai_time = now.strftime("%H:%M")
-        
-        # 🔍 ดำเนินการค้นหาข้อมูลจากอินเทอร์เน็ต
-        # เราจะค้นหาทุกครั้งที่ถาม เพื่อให้ได้ข้อมูล Real-time
-        search_data = await deep_search(question)
+        current_time_str = now.strftime("%d/%m/%Y %H:%M")
 
-        # 🧠 ปรับ System Prompt ให้เป็นลุงอ๊อดร่าง "ผู้ดีกวนตีน"
-        system_instruction = (
-            f"คุณคือผู้ช่วย AI อัจฉริยะนามว่า 'ลุงอ๊อด' (เวอร์ชันกวนๆ แต่คุยรู้เรื่อง) "
-            f"ข้อมูลปัจจุบันของคุณคือ วันที่ {thai_date} เวลา {thai_time} น. "
-            f"คำแนะนำในการตอบ:\n"
-            f"1. ใช้ภาษาไทยภาคกลางที่สุภาพ เป็นทางการแต่แฝงความกวนตีนแบบเป็นกันเอง\n"
-            f"2. หากเป็นข้อมูลข่าวสาร หุ้น หรือราคาทอง ให้ใช้ข้อมูลจากเน็ตด้านล่างนี้ประกอบการสรุปเสมอ ห้ามมโนตัวเลขเองเด็ดขาด\n"
-            f"3. จัดรูปแบบคำตอบให้สวยงาม ใช้ตัวหนา (bold) และรายการแบบจุด (bullet points) เพื่อให้อ่านง่าย\n"
-            f"4. หากข้อมูลไม่ชัดเจน ให้ตอบกวนๆ ว่าไม่แน่ใจ พร้อมระบุแหล่งที่มาหรือแนะนำให้ไปเช็คเองอีกที\n"
-            f"5. ข้อมูลที่คุณค้นพบมาได้คือ: {search_data}"
+        # 🔍 Step 1: ค้นหาข้อมูลก่อน (RAG Process)
+        search_results = await pro_search(question)
+
+        # 🧠 Step 2: สร้าง System Instruction ที่แข็งแกร่ง
+        # เราส่งข้อมูลเข้าไปใน 'contents' แทนการใช้ system_instruction แยก (เพื่อความเสถียร)
+        prompt_context = (
+            f"คุณคือผู้ช่วย AI อัจฉริยะ 'ลุงอ๊อด' ที่มีความรอบรู้ระดับสูงและสุภาพ\n"
+            f"วันนี้คือวันที่: {current_time_str}\n"
+            f"คำแนะนำสำคัญ:\n"
+            f"1. ใช้ข้อมูลจากอินเทอร์เน็ตนี้เป็นหลักในการตอบ: {search_results}\n"
+            f"2. หากข้อมูลในเน็ตระบุราคาหุ้น หรือทองคำ ให้ยึดตามนั้นและบอกแหล่งที่มา\n"
+            f"3. ถ้าข้อมูลในเน็ตไม่มี ให้แจ้งหลานตามตรงว่าข้อมูลยังไม่อัปเดต ห้ามมโนตัวเลขเอง\n"
+            f"4. ตอบด้วยภาษาไทยที่สละสลวย มีตัวหนา และ bullet points ให้อ่านง่าย\n\n"
+            f"คำถามจากหลาน: {question}"
         )
-        
-        if channel_id not in chat_memory:
-            chat_memory[channel_id] = [{"role": "system", "content": system_instruction}]
-        else:
-            chat_memory[channel_id][0]["content"] = system_instruction
-
-        chat_memory[channel_id].append({"role": "user", "content": question})
 
         try:
-            # 1. เปลี่ยนมาใช้ llama-3.1-8b-instant (โควตาเยอะกว่าและเร็วมาก)
-            chat_completion = await groq_client.chat.completions.create(
-                messages=chat_memory[channel_id],
-                model="llama-3.1-8b-instant",
-                temperature=0.3,
-                max_tokens=800, # ลด max_tokens ลงเพื่อประหยัดโควตา
-            )
-            
-            answer = chat_completion.choices[0].message.content
-            chat_memory[channel_id].append({"role": "assistant", "content": answer})
-            
-            # 2. ลดความจำย้อนหลังเหลือ 6 ข้อความ (รวม System Prompt เป็น 7)
-            # ยิ่งความจำสั้น ยิ่งประหยัด Token ต่อการส่ง 1 ครั้ง
-            if len(chat_memory[channel_id]) > 7:
-                chat_memory[channel_id] = [chat_memory[channel_id][0]] + chat_memory[channel_id][-6:]
+            # 🚀 Step 3: ส่งให้ Gemini ประมวลผล
+            # Gemini เก่งเรื่องการอ่าน Context ยาวๆ ดังนั้นส่ง Search ไปเยอะๆ ได้เลย
+            response = model.generate_content(prompt_context)
+            answer = response.text
+
+            # บันทึกความจำ (แบบง่าย)
+            if channel_id not in chat_memory:
+                chat_memory[channel_id] = []
+            chat_memory[channel_id].append({"role": "user", "parts": [question]})
+            chat_memory[channel_id].append({"role": "model", "parts": [answer]})
+
+            # คุมขนาดความจำ
+            if len(chat_memory[channel_id]) > 10:
+                chat_memory[channel_id] = chat_memory[channel_id][-10:]
 
             save_memory(chat_memory)
-            
-            # จัดการความยาวข้อความ Discord
-            if len(answer) > 1950:
-                # แบ่งส่งถ้าข้อความยาวเกินไป
-                parts = [answer[i:i+1950] for i in range(0, len(answer), 1950)]
-                for part in parts:
-                    await ctx.send(part)
+
+            # ส่งคำตอบ (รองรับข้อความยาว)
+            if len(answer) > 2000:
+                for i in range(0, len(answer), 2000):
+                    await ctx.send(answer[i:i+2000])
             else:
                 await ctx.send(answer)
-            
+
         except Exception as e:
-            print(f"Error: {e}")
-            await ctx.send("ขออภัยครับลุงมึนหัวนิดหน่อย ระบบประมวลผลข้อมูลขัดข้อง ลองใหม่อีกทีนะหลาน")
+            print(f"Gemini Error: {e}")
+            await ctx.send("ขออภัยครับหลาน สมองลุงเกิดอาการช็อตนิดหน่อย ลองถามใหม่อีกทีนะ")
+            
 # --- [ แถม: คำสั่งล้างสมอง ] ---
 @bot.command()
 async def forget(ctx):
