@@ -7,9 +7,12 @@ import time
 import datetime
 from google import genai
 
-GEMINI_API_KEY = 'AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM'
-client = genai.Client(api_key=GEMINI_API_KEY)
+from groq import AsyncGroq  # ใช้ของ Groq
 
+GROQ_API_KEY = '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'
+
+# เปิดการเชื่อมต่อ
+groq_client = AsyncGroq(api_key=GROQ_API_KEY)
 
 
 
