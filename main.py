@@ -170,7 +170,7 @@ async def ask(ctx, *, question: str):
             if len(answer) > 1900:
                 answer = answer[:1900] + "\n\n*(เนื้อหายาวเกินไป ลุงอ๊อดขอตัดจบแค่นี้นะ!)*"
                 
-            await ctx.send(f"🧠 **ลุงอ๊อดตอบ:**\n{answer}")
+            await ctx.send(f"{answer}")
             
         except Exception as e:
             print(f"Gemini Error: {e}")
