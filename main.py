@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+import json
 import os
 import asyncio
 import psutil
@@ -154,22 +155,50 @@ async def status(ctx):
     )
     
     await ctx.send(report)
+# ชื่อไฟล์ที่จะใช้เก็บความจำ
+MEMORY_FILE = 'brain.json'
+
+# ฟังก์ชันโหลดความจำจากไฟล์
+def load_memory():
+    if os.path.exists(MEMORY_FILE):
+        try:
+            with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {} # ถ้าไฟล์เสียหรือว่าง ให้เริ่มใหม่
+    return {}
+
+# ฟังก์ชันบันทึกความจำลงไฟล์
+def save_memory(data):
+    with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
+        # indent=4 ทำให้ไฟล์อ่านง่าย, ensure_ascii=False ทำให้เซฟภาษาไทยได้
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+# โหลดความจำขึ้นมาเก็บไว้ในตัวแปรทันทีที่เปิดบอท
+chat_memory = load_memory()
 
 @bot.command(aliases=['ood'])
 async def ask(ctx, *, question: str):
     async with ctx.typing():
+        # 1. ระบุ ID ห้องคุย (ใช้ string เพื่อให้เซฟลง JSON ได้)
+        channel_id = str(ctx.channel.id)
+        
+        # 2. ตั้งค่าระบบ (ถ้ายังไม่เคยคุยกันในห้องนี้)
+        if channel_id not in chat_memory:
+            chat_memory[channel_id] = [
+                {
+                    "role": "system",
+                    "content": "คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณ นิสัยกวนประสาทแต่ใจดี ต้องตอบเป็นภาษาไทยภาคกลางเท่านั้น ห้ามใช้ภาษาอื่นปนเด็ดขาด ตอบให้เหมือนลุงข้างบ้านที่คุยรู้เรื่องแต่กวนตีน"
+                }
+            ]
+        
+        # 3. จดคำถามของหลานลงสมุด
+        chat_memory[channel_id].append({"role": "user", "content": question})
+
         try:
+            # 4. ส่งสมุดจดทั้งหมดให้ Groq วิเคราะห์ (เพื่อให้จำสิ่งที่คุยก่อนหน้าได้)
             chat_completion = await groq_client.chat.completions.create(
-                messages=[ # <--- ต้องเริ่มด้วยก้ามปูเปิด
-                    {
-                        "role": "system",
-                        "content": "คุณคือ 'ลุงอ๊อด' ชายไทยวัยเกษียณ นิสัยกวนประสาทแต่ใจดี ต้องตอบเป็นภาษาไทยภาคกลางเท่านั้น ห้ามใช้ภาษาอื่นปนเด็ดขาด ตอบให้เหมือนลุงข้างบ้านที่คุยรู้เรื่องแต่กวนตีน"
-                    },
-                    {
-                        "role": "user",
-                        "content": question,
-                    }
-                ], # <--- ต้องจบด้วยก้ามปูปิด
+                messages=chat_memory[channel_id],
                 model="llama-3.3-70b-versatile",
                 temperature=0.5,
                 max_tokens=1024,
@@ -177,6 +206,17 @@ async def ask(ctx, *, question: str):
             
             answer = chat_completion.choices[0].message.content
             
+            # 5. จดคำตอบของลุงลงสมุดด้วย
+            chat_memory[channel_id].append({"role": "assistant", "content": answer})
+            
+            # 6. คุมขนาดสมอง (จำย้อนหลัง 10 ข้อความล่าสุด เพื่อไม่ให้แรมเต็ม)
+            if len(chat_memory[channel_id]) > 11:
+                chat_memory[channel_id] = [chat_memory[channel_id][0]] + chat_memory[channel_id][-10:]
+
+            # 7. 🔥 บันทึกลง Disk ทันที! (กันลืมตอนปิดบอท)
+            save_memory(chat_memory)
+            
+            # ตัดคำถ้าคำตอบยาวเกินไปตามที่หลานเขียนไว้
             if len(answer) > 1900:
                 answer = answer[:1900] + "\n\n*(เนื้อหายาวเกินไป ลุงอ๊อดขอตัดจบแค่นี้นะ!)*"
                 
@@ -185,6 +225,17 @@ async def ask(ctx, *, question: str):
         except Exception as e:
             print(f"Groq Error: {e}")
             await ctx.send("⚠️ ลุงอ๊อดมึนหัว ระบบ AI มีปัญหานิดหน่อย ลองใหม่อีกทีนะ")
+
+# --- [ แถม: คำสั่งล้างสมอง ] ---
+@bot.command()
+async def forget(ctx):
+    channel_id = str(ctx.channel.id)
+    if channel_id in chat_memory:
+        del chat_memory[channel_id]
+        save_memory(chat_memory)
+        await ctx.send("🧹 ลุงอ๊อดลืมหมดแล้วว่าเมื่อกี้เราคุยอะไรกัน!")
+    else:
+        await ctx.send("🤔 เราเคยคุยกันด้วยเรอะ? ลุงจำไม่ได้อยู่แล้ว")
 
 bot.run(TOKEN)
 
