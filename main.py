@@ -14,7 +14,7 @@ GEMINI_API_KEY = 'AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM'
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ใช้ชื่อรุ่นนี้ ชัวร์ที่สุดในตอนนี้ครับ
-model = genai.GenerativeModel('gemini-flash-latest')
+model = genai.GenerativeModel('gemini-flash-lite-latest')
 
 
 start_time = time.time()
