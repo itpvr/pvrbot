@@ -5,10 +5,11 @@ import asyncio
 import psutil
 import time
 import datetime
-from google import genai
+import google.generativeai as genai
 
 GEMINI_API_KEY = 'AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM'
-client = genai.Client(api_key=GEMINI_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
+model_ai = genai.GenerativeModel('gemini-1.5-flash')
 
 
 
