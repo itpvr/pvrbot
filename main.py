@@ -181,23 +181,22 @@ chat_memory = load_memory()
 import datetime
 from ddgs import DDGS
 
-# --- [ 1. ฟังก์ชันค้นหาข้อมูลเชิงลึก ] ---
 async def deep_search(query):
     try:
         with DDGS() as ddgs:
-            # เพิ่มคำสำคัญเพื่อให้ผลลัพธ์แม่นยำและเป็นปัจจุบันที่สุด
-            refined_query = f"{query} ล่าสุด วันนี้"
-            results = [r for r in ddgs.text(refined_query, max_results=5)]
+            # เพิ่มแหล่งอ้างอิงที่เชื่อถือได้ เช่น Yahoo Finance, Google Finance, Investing
+            refined_query = f"{query} price stock yahoo financeล่าสุด"
+            results = [r for r in ddgs.text(refined_query, max_results=4)]
             
-            if not results:
-                return "ไม่พบข้อมูลที่แน่ชัดจากแหล่งข่าวออนไลน์"
+            if not results: return "ไม่พบข้อมูลสด"
             
-            context = "ข้อมูลสรุปจากอินเทอร์เน็ต:\n"
+            context = "⚠️ ข้อมูลดิบจากเน็ต (โปรดตรวจสอบวันที่ในวงเล็บ):\n"
             for res in results:
+                # พยายามดึงข้อมูลมาให้ AI วิเคราะห์
                 context += f"- {res['body']}\n"
             return context
     except Exception as e:
-        return f"เกิดข้อผิดพลาดในการเข้าถึงข้อมูล: {e}"
+        return f"Error: {e}"
 
 # --- [ 2. คำสั่ง !ask / !ood แบบ Gemini Style ] ---
 @bot.command(aliases=['ood', 'ถาม'])
@@ -214,15 +213,15 @@ async def ask(ctx, *, question: str):
         # เราจะค้นหาทุกครั้งที่ถาม เพื่อให้ได้ข้อมูล Real-time
         search_data = await deep_search(question)
 
-        # 🧠 ปรับ System Prompt ให้สุภาพ มีโครงสร้าง และเป็นกลางแบบ Gemini
+        # 🧠 ปรับ System Prompt ให้เป็นลุงอ๊อดร่าง "ผู้ดีกวนตีน"
         system_instruction = (
             f"คุณคือผู้ช่วย AI อัจฉริยะนามว่า 'ลุงอ๊อด' (เวอร์ชันกวนๆ แต่คุยรู้เรื่อง) "
             f"ข้อมูลปัจจุบันของคุณคือ วันที่ {thai_date} เวลา {thai_time} น. "
             f"คำแนะนำในการตอบ:\n"
-            f"1. ใช้ภาษาไทยภาคกลางที่สุภาพ ออกกวนนตีนๆ เป็นทางการแต่เป็นกันเอง\n"
-            f"2. หากเป็นข้อมูลข่าวสาร หุ้น หรือราคาทอง ให้ใช้ข้อมูลจากเน็ตด้านล่างนี้ประกอบการสรุปเสมอ\n"
+            f"1. ใช้ภาษาไทยภาคกลางที่สุภาพ เป็นทางการแต่แฝงความกวนตีนแบบเป็นกันเอง\n"
+            f"2. หากเป็นข้อมูลข่าวสาร หุ้น หรือราคาทอง ให้ใช้ข้อมูลจากเน็ตด้านล่างนี้ประกอบการสรุปเสมอ ห้ามมโนตัวเลขเองเด็ดขาด\n"
             f"3. จัดรูปแบบคำตอบให้สวยงาม ใช้ตัวหนา (bold) และรายการแบบจุด (bullet points) เพื่อให้อ่านง่าย\n"
-            f"4. หากข้อมูลไม่ชัดเจน ให้ระบุแหล่งที่มาหรือแนะนำให้ตรวจสอบจากแหล่งทางการอีกครั้ง\n"
+            f"4. หากข้อมูลไม่ชัดเจน ให้ตอบกวนๆ ว่าไม่แน่ใจ พร้อมระบุแหล่งที่มาหรือแนะนำให้ไปเช็คเองอีกที\n"
             f"5. ข้อมูลที่คุณค้นพบมาได้คือ: {search_data}"
         )
         
@@ -237,7 +236,7 @@ async def ask(ctx, *, question: str):
             # 1. เปลี่ยนมาใช้ llama-3.1-8b-instant (โควตาเยอะกว่าและเร็วมาก)
             chat_completion = await groq_client.chat.completions.create(
                 messages=chat_memory[channel_id],
-                model="llama-3.1-8b-instant", # เปลี่ยนตรงนี้
+                model="llama-3.1-8b-instant",
                 temperature=0.3,
                 max_tokens=800, # ลด max_tokens ลงเพื่อประหยัดโควตา
             )
@@ -263,7 +262,7 @@ async def ask(ctx, *, question: str):
             
         except Exception as e:
             print(f"Error: {e}")
-            await ctx.send("ขออภัยครับ ขณะนี้ระบบประมวลผลข้อมูลขัดข้อง กรุณาลองใหม่อีกครั้งในภายหลังครับ")
+            await ctx.send("ขออภัยครับลุงมึนหัวนิดหน่อย ระบบประมวลผลข้อมูลขัดข้อง ลองใหม่อีกทีนะหลาน")
 # --- [ แถม: คำสั่งล้างสมอง ] ---
 @bot.command()
 async def forget(ctx):
