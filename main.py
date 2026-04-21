@@ -234,20 +234,21 @@ async def ask(ctx, *, question: str):
         chat_memory[channel_id].append({"role": "user", "content": question})
 
         try:
-            # เรียกใช้โมเดลท็อปสุดของ Groq (Llama 3.3 70B)
+            # 1. เปลี่ยนมาใช้ llama-3.1-8b-instant (โควตาเยอะกว่าและเร็วมาก)
             chat_completion = await groq_client.chat.completions.create(
                 messages=chat_memory[channel_id],
-                model="llama-3.3-70b-versatile",
-                temperature=0.3, # ลด Temp ลงเพื่อให้คำตอบนิ่งและแม่นยำที่สุด
-                max_tokens=1500,
+                model="llama-3.1-8b-instant", # เปลี่ยนตรงนี้
+                temperature=0.3,
+                max_tokens=800, # ลด max_tokens ลงเพื่อประหยัดโควตา
             )
             
             answer = chat_completion.choices[0].message.content
             chat_memory[channel_id].append({"role": "assistant", "content": answer})
             
-            # เก็บความจำ 10 ข้อความ
-            if len(chat_memory[channel_id]) > 11:
-                chat_memory[channel_id] = [chat_memory[channel_id][0]] + chat_memory[channel_id][-10:]
+            # 2. ลดความจำย้อนหลังเหลือ 6 ข้อความ (รวม System Prompt เป็น 7)
+            # ยิ่งความจำสั้น ยิ่งประหยัด Token ต่อการส่ง 1 ครั้ง
+            if len(chat_memory[channel_id]) > 7:
+                chat_memory[channel_id] = [chat_memory[channel_id][0]] + chat_memory[channel_id][-6:]
 
             save_memory(chat_memory)
             
