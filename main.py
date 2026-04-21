@@ -14,7 +14,7 @@ GEMINI_API_KEY = 'AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM'
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ใช้ชื่อรุ่นนี้ ชัวร์ที่สุดในตอนนี้ครับ
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-flash-latest')
 
 
 start_time = time.time()
@@ -32,11 +32,6 @@ intents.messages = True
 @bot.event
 async def on_ready():
     print(f'✅ ออนไลน์แล้วในชื่อ: {bot.user}')
-    print("--- รายชื่อรุ่นที่หลานใช้ได้จริง ---")
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods:
-            print(f"ชื่อรุ่น: {m.name}")
-    print("----------------------------")
     # 2. 🏠 เริ่มต้นระบบเช็คห้องเสียงอันแสนเสถียรของเรา (ขาดตัวนี้ไม่ได้!)
     if not hasattr(bot, 'voice_check_task') or not bot.voice_check_task.is_running():
         bot.voice_check_task = check_voice_status.start()
