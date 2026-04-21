@@ -32,6 +32,11 @@ intents.messages = True
 @bot.event
 async def on_ready():
     print(f'✅ ออนไลน์แล้วในชื่อ: {bot.user}')
+    print("--- รายชื่อรุ่นที่หลานใช้ได้จริง ---")
+    for m in genai.list_models():
+        if 'generateContent' in m.supported_generation_methods:
+            print(f"ชื่อรุ่น: {m.name}")
+    print("----------------------------")
     # 2. 🏠 เริ่มต้นระบบเช็คห้องเสียงอันแสนเสถียรของเรา (ขาดตัวนี้ไม่ได้!)
     if not hasattr(bot, 'voice_check_task') or not bot.voice_check_task.is_running():
         bot.voice_check_task = check_voice_status.start()
