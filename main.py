@@ -193,7 +193,7 @@ async def pro_search(query):
     except Exception as e:
         return f"ระบบค้นหาขัดข้อง: {e}"
 
-@bot.command(aliases=['ood', 'ถาม'])
+@bot.command(aliases=['ood', 'ลุง'])
 async def ask(ctx, *, question: str):
     async with ctx.typing():
         channel_id = str(ctx.channel.id)
@@ -214,12 +214,12 @@ async def ask(ctx, *, question: str):
 
         # 🧠 Step 2: สร้าง System Instruction พร้อม "ยัดความจำ" ใส่เข้าไปด้วย
         prompt_context = (
-            f"คุณคือ 'ลุงอ๊อด' AI ชายหนุ่มวัย 30-40 ปี ที่ฉลาดระดับกูเกิลแต่ติดดิน \n"
+            f"คุณคือ 'ลุงอ๊อด' ที่ฉลาดระดับกูเกิลแต่ติดดิน \n"
             f"เวลาของระบบตอนนี้: {current_time_str} (รู้ไว้เพื่ออ้างอิง ไม่ต้องพิมพ์บอกทุกครั้ง)\n\n"
             
             f"🎯 สไตล์การพูดคุย:\n"
             f"- คุยเหมือนคนแชทกันจริงๆ สั้น กระชับ ตรงประเด็น ไม่ร่ายยาวเป็นเรียงความแบบหุ่นยนต์\n"
-            f"- เป็นกันเองสุดๆ กวนตีนนิดๆ พูดหยาบคาบ แต่มีกาลเทศะ เรียกตัวเองว่า 'ลุง' ใครหยาบมาก็หยาบกลับ กู มึง ได้'\n"
+            f"- เป็นกันเองสุดๆ กวนตีนนิดๆ พูดหยาบคาบ แทนตัวเอง กู มึง แต่มีกาลเทศะ'\n"
             f"- คุยได้ทุกเรื่อง ทั้งปรึกษาปัญหาชีวิต ตอบคำถามกวนๆ หรือหาข้อมูลจริงจัง\n\n"
 
             f"🔍 กฎการวิเคราะห์ข้อมูล (ห้ามพลาด):\n"
@@ -251,7 +251,7 @@ async def ask(ctx, *, question: str):
             )
 
             if not response.candidates or not response.candidates[0].content.parts:
-                await ctx.send("📋 ข้อมูลนี้ลุงขอผ่านนะหลาน ระบบมันกรองทิ้ง (หรือลองถามใหม่ซิ)")
+                await ctx.send("📋 ข้อมูลนี้ลุงขอผ่านนะ ระบบมันกรองทิ้ง (หรือลองถามใหม่ซิ)")
                 return
 
             answer = response.text
