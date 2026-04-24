@@ -79,9 +79,12 @@ async def clear(ctx, amount: int = 5):
         except Exception as e:
             print(f"❌ Clear error: {e}")
 
-# --- [ 📊 ระบบรายงานสุขภาพ (ตัดส่วน Database ออก) ] ---
+# --- [ 📊 ระบบรายงานสุขภาพ (แก้ไข NameError แล้ว) ] ---
 @bot.command()
 async def status(ctx):
+    # ดึงค่าชื่อบอทตรงนี้เลย ชัวร์สุดไม่หลุดแน่นอน
+    bot_name = os.getenv('BOT_NAME', 'online_bot')
+
     current_time = time.time()
     difference = int(round(current_time - start_time))
     text_uptime = str(datetime.timedelta(seconds=difference))
@@ -91,7 +94,7 @@ async def status(ctx):
     cpu = psutil.cpu_percent()
 
     report = (
-        f"**📊 รายงานสุขภาพ (Standby Mode): {BOT_NAME.upper()}**\n"
+        f"**📊 รายงานสุขภาพ (Standby Mode): {bot_name.upper()}**\n"
         f"---"
         f"\n⏱️ **เปิดมาแล้ว:** `{text_uptime}`"
         f"\n🏎️ **ความไว (Ping):** `{round(bot.latency * 1000)}ms`"
