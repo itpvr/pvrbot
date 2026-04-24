@@ -29,43 +29,93 @@ async def on_ready():
         bot.voice_check_task = check_voice_status.start()
         print("🏠 Voice Check Loop Started")
 
-# --- [ 🎤 ระบบยามเฝ้าห้อง 24 ชม. (เวอร์ชันดื้อแพ่ง ไม่ยอมหลุด) ] ---
-@tasks.loop(seconds=5) # เช็คทุก 5 วินาที ตามสั่ง!
+# --- [ ⚡ ชั้นที่ 1: ระบบ Instant Reconnect & Logging ] ---
+LOG_CHANNEL_ID = 1497227431462043708 # ห้องส่ง Log
+
+# สร้างความจำชั่วคราวให้บอทเอาไว้จำเวลาหลุด (ใส่ไว้นอกฟังก์ชัน หรือใต้ on_ready ก็ได้)
+bot.last_disconnect_time = None
+bot.disconnect_reason = ""
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    # ทำงานเฉพาะเมื่อเหตุการณ์นี้เกิดกับตัวบอทเอง
+    if member.id == bot.user.id:
+        TARGET_ID = 1069137562213552128
+        target_channel = bot.get_channel(TARGET_ID)
+
+        # 🔴 ตรวจจับ 1: สายหลุด / โดนเตะ (ก่อนหน้ามีห้อง -> ตอนนี้ไม่มี)
+        if before.channel is not None and after.channel is None:
+            bot.last_disconnect_time = time.time()
+            bot.disconnect_reason = "🔌 เน็ตเซิร์ฟเวอร์หลุด หรือ โดนคนเตะปลั๊ก!"
+            print(f"⚠️ บอทหลุดจากห้องเสียง! กำลังกู้คืน...")
+            if target_channel:
+                try: await target_channel.connect(reconnect=True, timeout=10)
+                except: pass
+
+        # 🟠 ตรวจจับ 2: โดนลากไปห้องอื่น (อยู่ห้องอื่นที่ไม่ใช่เป้าหมาย)
+        elif after.channel is not None and after.channel.id != TARGET_ID:
+            bot.last_disconnect_time = time.time()
+            bot.disconnect_reason = f"🪝 โดนมือดีลากไปห้อง: {after.channel.name}"
+            print(f"⚡ โดนลาก! กำลังวาร์ปกลับ...")
+            if target_channel:
+                try: await member.move_to(target_channel)
+                except: pass
+
+        # 🟢 ตรวจจับ 3: กลับเข้าห้องเป้าหมายสำเร็จ
+        elif after.channel is not None and after.channel.id == TARGET_ID:
+            # เช็คว่ามีประวัติการหลุดค้างไว้ไหม (ป้องกันการแจ้งเตือนตอนเพิ่งรันบอทครั้งแรก)
+            if hasattr(bot, 'last_disconnect_time') and bot.last_disconnect_time is not None:
+                downtime = round(time.time() - bot.last_disconnect_time, 1)
+                reason = bot.disconnect_reason
+                
+                # ล้างความจำเพื่อรอรอบต่อไป
+                bot.last_disconnect_time = None
+                bot.disconnect_reason = ""
+
+                # ส่งใบรายงานเข้าห้อง Log
+                log_channel = bot.get_channel(LOG_CHANNEL_ID)
+                if log_channel:
+                    bot_name = os.getenv('BOT_NAME', bot.user.name)
+                    
+                    # เลือกว่าจะให้ขอบเป็นสีอะไร
+                    color = discord.Color.orange() if "ลาก" in reason else discord.Color.red()
+                    
+                    embed = discord.Embed(
+                        title="🔄 System Recovered (กู้คืนระบบเสียงสำเร็จ)",
+                        color=color,
+                        timestamp=datetime.datetime.now()
+                    )
+                    embed.add_field(name="🤖 บอทที่เกิดเหตุ", value=f"`{bot_name.upper()}`", inline=True)
+                    embed.add_field(name="⏱️ ระยะเวลาที่หลุดไป", value=f"`{downtime} วินาที`", inline=True)
+                    embed.add_field(name="🔍 สาเหตุที่ตรวจพบ", value=f"**{reason}**", inline=False)
+                    
+                    embed.set_footer(text=f"Auto Reconnect System", icon_url=bot.user.display_avatar.url if bot.user.display_avatar else None)
+                    
+                    await log_channel.send(embed=embed)
+
+# --- [ 🔄 ชั้นที่ 2: ยามเดินตรวจ (Safety Net) - ปรับเหลือ 2 วินาที ] ---
+@tasks.loop(seconds=2) 
 async def check_voice_status():
     await bot.wait_until_ready()
-    
-    # ID ห้องที่หลานสั่งให้เฝ้าตายตัว
     TARGET_ID = 1069137562213552128
     channel = bot.get_channel(TARGET_ID)
-    
-    if not channel:
-        print(f"⚠️ Error: หาห้อง ID {TARGET_ID} ไม่เจอว่ะหลาน!")
-        return
-    
-    guild = channel.guild
-    vc = guild.voice_client # เช็คว่าตอนนี้บอทต่ออยู่กับเสียงใน Server นี้ไหม
+    if not channel: return
 
-    try:
-        # กรณีที่ 1: บอทไม่ได้ต่อสายอยู่เลย (เช่น เพิ่งเปิดบอท หรือโดนเตะหลุด)
-        if vc is None:
-            await channel.connect(reconnect=True, timeout=20)
-            print(f"🏠 ลุงกลับเข้าห้อง {channel.name} แล้วโว้ย")
+    vc = channel.guild.voice_client
 
-        # กรณีที่ 2: บอทต่อสายอยู่ แต่ "อยู่ผิดห้อง" (โดนคนลากไป หรือเผลอไปกดเข้าห้องอื่น)
-        elif vc.channel.id != TARGET_ID:
-            # ใช้ move_to เพื่อย้ายห้องทันทีโดยไม่ Disconnect
-            await vc.move_to(channel)
-            print(f"🏃 ใครลากกู! ลุงรีบวิ่งกลับเข้าห้อง {channel.name} ทันที")
-
-    except Exception as e:
-        # ถ้าพยายามย้ายแล้ว Error (เช่น ห้องเต็ม หรือติด Permission)
-        # ลุงจะลองล้าง Session แล้วต่อใหม่ในรอบหน้า
-        print(f"⚠️ ระบบ Reconnect เอ๋อ: {e}")
-        if vc:
-            try:
-                await vc.disconnect(force=True)
-            except:
-                pass
+    # ถ้าชั้นที่ 1 (Event) พลาด หรือเน็ตกระตุกจน Event ไม่มา 
+    # ลูปนี้จะช่วยเช็คซ้ำทุก 2 วินาที
+    if vc is None or not vc.is_connected() or vc.channel.id != TARGET_ID:
+        try:
+            if vc and vc.is_connected():
+                await vc.move_to(channel)
+            else:
+                await channel.connect(reconnect=True, timeout=10)
+        except Exception as e:
+            # ถ้าเน่าหนักมาก ให้ล้าง Session ทิ้งเพื่อรอเชื่อมใหม่รอบหน้า
+            if vc: 
+                try: await vc.disconnect(force=True)
+                except: pass
 
 @bot.event
 async def on_voice_state_update(member, before, after):
