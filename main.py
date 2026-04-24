@@ -12,7 +12,7 @@ from ddgs import DDGS
 
 # --- [ ⚙️ ดึงค่าจาก Environment Variables ทันทีที่รัน ] ---
 TOKEN = os.getenv('DISCORD_TOKEN')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_API_KEY = "AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM"
 BOT_NAME = os.getenv('BOT_NAME', 'gosu') # รับชื่อบอทมาเพื่อตั้งชื่อไฟล์ฐานข้อมูล ถ้าไม่ใส่จะใช้ชื่อ gosu
 
 if not TOKEN or not GEMINI_API_KEY:
