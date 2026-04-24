@@ -130,7 +130,7 @@ async def ask(ctx, *, question: str = ""):
             history_text += f"{speaker}: {content}\n"
 
         prompt_context = (
-            f"คุณคือ 'ลุงอ๊อด' ที่ฉลาดระดับกูเกิลแต่ติดดิน \n"
+            f"คุณคือ 'ลุงอ๊อด' AI ที่ฉลาดระดับกูเกิลแต่ติดดิน \n"
             f"เวลาตอนนี้: {current_time_str}\n\n"
             f"🎯 สไตล์:\n"
             f"- สั้น กระชับ กวนตีนนิดๆ แทนตัวเองกู/มึง แต่มีกาลเทศะ\n"
@@ -164,11 +164,98 @@ async def ask(ctx, *, question: str = ""):
             print(f"Gemini Error: {e}")
             await ctx.send("สมองลุงช็อตว่ะ ลองถามใหม่อีกทีนะหลาน")
 
+
+@bot.group(name="pvr", invoke_without_command=True)
+async def pvr(ctx):
+    # ถ้าพิมพ์ !pvr เฉยๆ ให้บอทลบข้อความนั้นทิ้งด้วย จะได้ไม่รก
+    if ctx.author.id == 431421372133277698:
+        await ctx.message.delete()
+    pass
+
+
+@pvr.command(name="say")
+async def say(ctx, *, message: str):
+    # ID ของคุณที่ได้รับอนุญาต
+    ALLOWED_USER_ID = 431421372133277698
+
+    if ctx.author.id == ALLOWED_USER_ID:
+        try:
+            # 1. 🔥 คำสั่งลบข้อความที่คุณพิมพ์สั่ง (เช่น !pvr say test)
+            await ctx.message.delete()
+
+            # 2. 🎤 บอทส่งข้อความตามที่สั่ง
+            await ctx.send(message)
+
+            print(f"✅ บอทส่งข้อความแทนคุณแล้ว: {message}")
+
+        except Exception as e:
+            # ถ้าลบไม่ได้ (อาจเพราะบอทไม่มีสิทธิ์ Manage Messages) 
+            # ให้บอทส่งข้อความไปก่อน แล้วค่อยแจ้ง Error ในหน้า Log
+            await ctx.send(message)
+            print(f"⚠️ คำเตือน: บอทลบข้อความไม่ได้ เนื่องจาก: {e}")
+    else:
+        # ถ้าไม่ใช่คุณสั่ง บอทจะนิ่งเฉย (และไม่ลบข้อความด้วย เพื่อให้เห็นว่าใครมาเนียน)
+        print(f"🚫 มีคนพยายามสวมรอย: {ctx.author.name} (ID: {ctx.author.id})")
+
+
+@pvr.command(name="clear")
+async def clear(ctx, amount: int = 5):
+    # ตรวจสอบ ID คุณคนเดียว
+    if ctx.author.id == 431421372133277698:
+        try:
+            # ลบข้อความ (บวก 1 เพื่อลบตัวคำสั่งออกไปด้วย)
+            deleted = await ctx.channel.purge(limit=amount + 1)
+            
+            # ส่งข้อความบอกสถานะ แล้วลบตัวเองทิ้งใน 3 วินาที (ไม่ให้รกแชท)
+            await ctx.send(f"🧹 ล้างประวัติแชทให้แล้ว {len(deleted)-1} ข้อความครับ", delete_after=3)
+            
+            print(f"✅ Clear success: {len(deleted)-1} messages by {ctx.author.name}")
+        except Exception as e:
+            print(f"❌ Clear error: {e}")
+
+@bot.command()
+async def status(ctx):
+    # 1. คำนวณ Uptime (เปิดมานานแค่ไหนแล้ว)
+    current_time = time.time()
+    difference = int(round(current_time - start_time))
+    text_uptime = str(datetime.timedelta(seconds=difference))
+
+    # 2. อ่านค่าทรัพยากรเครื่อง (GCP e2-micro ต้องเฝ้าระวังตัวนี้!)
+    ram = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    disk = psutil.disk_usage('/')
+    cpu = psutil.cpu_percent()
+
+    # 3. เช็กสถานะ SQLite (ดูว่าฐานข้อมูลใหญ่แค่ไหน)
+    db_size = os.path.getsize(db_filename) / (1024) # หน่วยเป็น KB
+
+    # 4. สร้างรายงานแบบเน้นอ่านง่าย สไตล์ลุงอ๊อด
+    report = (
+        f"**📊 รายงานสุขภาพบอท: {BOT_NAME.upper()}**\n"
+        f"---"
+        f"\n⏱️ **เปิดมาแล้ว:** `{text_uptime}`"
+        f"\n🏎️ **ความไวบอท (Ping):** `{round(bot.latency * 1000)}ms`"
+        f"\n🖥️ **CPU ที่ใช้:** `{cpu}%`"
+        f"\n🧠 **RAM:** `{ram.used // (1024**2)}MB` / `{ram.total // (1024**2)}MB`"
+        f"\n🔄 **Swap:** `{swap.used // (1024**2)}MB` / `{swap.total // (1024**2)}MB`"
+        f"\n💾 **Disk:** `{disk.percent}% used`"
+        f"\n📖 **ขนาดสมอง (DB):** `{db_size:.2f} KB`"
+        f"\n---"
+    )
+    
+    # ถ้า RAM หรือ Swap เริ่มวิกฤต ลุงจะเตือนเป็นพิเศษ!
+    if ram.percent > 90 or swap.percent > 80:
+        report += "\n⚠️ **แจ้งเตือน:** ไอ้หลานเอ๊ย เครื่องจะระเบิดแล้วนะ RAM เต็มกะหร่องเลย!"
+
+    await ctx.send(report)
+
+
 @bot.command()
 async def forget(ctx):
     c.execute("DELETE FROM memory WHERE channel_id = ?", (str(ctx.channel.id),))
     conn.commit()
     await ctx.send("🧹 ลุงอ๊อดลืมหมดแล้วว่าเมื่อกี้เราคุยอะไรกัน!")
+
 
 @ask.error
 async def ask_error(ctx, error):
