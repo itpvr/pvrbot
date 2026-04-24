@@ -36,63 +36,85 @@ LOG_CHANNEL_ID = 1497227431462043708 # ห้องส่ง Log
 bot.last_disconnect_time = None
 bot.disconnect_reason = ""
 
+# --- [ ⚡ ชั้นที่ 1: ระบบ Instant Reconnect & Pro Logging (English UI) ] ---
+LOG_CHANNEL_ID = 1497227431462043708 # ห้องส่ง Log
+
+# เปลี่ยนมาใช้ Dictionary เพื่อเก็บข้อมูลให้ละเอียดขึ้น
+bot.disconnect_info = None
+
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # ทำงานเฉพาะเมื่อเหตุการณ์นี้เกิดกับตัวบอทเอง
+    # ทำงานเฉพาะตัวบอท
     if member.id == bot.user.id:
         TARGET_ID = 1069137562213552128
         target_channel = bot.get_channel(TARGET_ID)
 
-        # 🔴 ตรวจจับ 1: สายหลุด / โดนเตะ (ก่อนหน้ามีห้อง -> ตอนนี้ไม่มี)
+        # 🔴 ตรวจจับ 1: สายหลุด หรือ โดนเตะ (Connection Dropped / Kicked)
         if before.channel is not None and after.channel is None:
-            bot.last_disconnect_time = time.time()
-            bot.disconnect_reason = "🔌 เน็ตเซิร์ฟเวอร์หลุด หรือ โดนคนเตะปลั๊ก!"
+            bot.disconnect_info = {
+                "time": time.time(),
+                "type": "drop",
+                "reason": "Connection Dropped or Forcefully Kicked",
+                "dragged_to": None
+            }
             print(f"⚠️ บอทหลุดจากห้องเสียง! กำลังกู้คืน...")
             if target_channel:
                 try: await target_channel.connect(reconnect=True, timeout=10)
                 except: pass
 
-        # 🟠 ตรวจจับ 2: โดนลากไปห้องอื่น (อยู่ห้องอื่นที่ไม่ใช่เป้าหมาย)
+        # 🟠 ตรวจจับ 2: โดนลากไปห้องอื่น (Forcefully Moved)
         elif after.channel is not None and after.channel.id != TARGET_ID:
-            bot.last_disconnect_time = time.time()
-            bot.disconnect_reason = f"🪝 โดนมือดีลากไปห้อง: {after.channel.name}"
+            bot.disconnect_info = {
+                "time": time.time(),
+                "type": "move",
+                "reason": "Forcefully Moved by User",
+                "dragged_to": after.channel.id
+            }
             print(f"⚡ โดนลาก! กำลังวาร์ปกลับ...")
             if target_channel:
                 try: await member.move_to(target_channel)
                 except: pass
 
-        # 🟢 ตรวจจับ 3: กลับเข้าห้องเป้าหมายสำเร็จ
+        # 🟢 ตรวจจับ 3: กลับเข้าห้องเป้าหมายสำเร็จ (Recovery Successful)
         elif after.channel is not None and after.channel.id == TARGET_ID:
-            # เช็คว่ามีประวัติการหลุดค้างไว้ไหม (ป้องกันการแจ้งเตือนตอนเพิ่งรันบอทครั้งแรก)
-            if hasattr(bot, 'last_disconnect_time') and bot.last_disconnect_time is not None:
-                downtime = round(time.time() - bot.last_disconnect_time, 1)
-                reason = bot.disconnect_reason
+            # ถ้ามีข้อมูลการหลุดบันทึกไว้ ค่อยสร้าง Log
+            if getattr(bot, 'disconnect_info', None) is not None:
+                info = bot.disconnect_info
+                downtime = round(time.time() - info["time"], 2) # ทศนิยม 2 ตำแหน่งให้ดูโปร
                 
-                # ล้างความจำเพื่อรอรอบต่อไป
-                bot.last_disconnect_time = None
-                bot.disconnect_reason = ""
-
-                # ส่งใบรายงานเข้าห้อง Log
                 log_channel = bot.get_channel(LOG_CHANNEL_ID)
                 if log_channel:
-                    bot_name = os.getenv('BOT_NAME', bot.user.name)
+                    # เลือกสีและไอคอนตามสาเหตุ
+                    embed_color = discord.Color.red() if info["type"] == "drop" else discord.Color.gold()
+                    status_icon = "🔴" if info["type"] == "drop" else "🟠"
                     
-                    # เลือกว่าจะให้ขอบเป็นสีอะไร
-                    color = discord.Color.orange() if "ลาก" in reason else discord.Color.red()
-                    
+                    # สร้าง Embed แบบเรียบหรู (Clean Design)
                     embed = discord.Embed(
-                        title="🔄 System Recovered (กู้คืนระบบเสียงสำเร็จ)",
-                        color=color,
+                        title=f"{status_icon} Voice Connection Restored",
+                        color=embed_color,
                         timestamp=datetime.datetime.now()
                     )
-                    embed.add_field(name="🤖 บอทที่เกิดเหตุ", value=f"`{bot_name.upper()}`", inline=True)
-                    embed.add_field(name="⏱️ ระยะเวลาที่หลุดไป", value=f"`{downtime} วินาที`", inline=True)
-                    embed.add_field(name="🔍 สาเหตุที่ตรวจพบ", value=f"**{reason}**", inline=False)
                     
-                    embed.set_footer(text=f"Auto Reconnect System", icon_url=bot.user.display_avatar.url if bot.user.display_avatar else None)
+                    # ใส่รูปโปรไฟล์บอทไว้ด้านบน
+                    avatar_url = member.display_avatar.url if member.display_avatar else None
+                    embed.set_author(name=f"System Alert : {member.display_name}", icon_url=avatar_url)
+                    
+                    # จัดเรียงข้อมูลแบบ Grid
+                    embed.add_field(name="Trigger Reason", value=f"`{info['reason']}`", inline=False)
+                    embed.add_field(name="Recovery Time", value=f"`{downtime} Seconds`", inline=True)
+                    embed.add_field(name="Target Channel", value=f"<#{TARGET_ID}>", inline=True)
+                    
+                    # ถ้าโดนลาก ให้แฉด้วยว่าลากไปห้องไหน
+                    if info["type"] == "move" and info["dragged_to"]:
+                        embed.add_field(name="Dragged To", value=f"<#{info['dragged_to']}>", inline=False)
+                        
+                    embed.set_footer(text="Automated Recovery Service")
                     
                     await log_channel.send(embed=embed)
-
+                
+                # เคลียร์ความจำทิ้ง เตรียมรับมือรอบต่อไป
+                bot.disconnect_info = None
+                
 # --- [ 🔄 ชั้นที่ 2: ยามเดินตรวจ (Safety Net) - ปรับเหลือ 2 วินาที ] ---
 @tasks.loop(seconds=2) 
 async def check_voice_status():
