@@ -29,25 +29,43 @@ async def on_ready():
         bot.voice_check_task = check_voice_status.start()
         print("🏠 Voice Check Loop Started")
 
-# --- [ 🎤 ระบบเฝ้าห้องเสียง ] ---
-@tasks.loop(seconds=10) # ตั้ง 10 วิก็พอ จะได้ไม่กิน CPU เซิร์ฟเวอร์ฟรี
+# --- [ 🎤 ระบบยามเฝ้าห้อง 24 ชม. (เวอร์ชันดื้อแพ่ง ไม่ยอมหลุด) ] ---
+@tasks.loop(seconds=5) # เช็คทุก 5 วินาที ตามสั่ง!
 async def check_voice_status():
     await bot.wait_until_ready()
-    channel = bot.get_channel(TARGET_CHANNEL_ID)
-    if channel is None: return
+    
+    # ID ห้องที่หลานสั่งให้เฝ้าตายตัว
+    TARGET_ID = 1069137562213552128
+    channel = bot.get_channel(TARGET_ID)
+    
+    if not channel:
+        print(f"⚠️ Error: หาห้อง ID {TARGET_ID} ไม่เจอว่ะหลาน!")
+        return
     
     guild = channel.guild
-    vc = guild.voice_client
+    vc = guild.voice_client # เช็คว่าตอนนี้บอทต่ออยู่กับเสียงใน Server นี้ไหม
+
     try:
+        # กรณีที่ 1: บอทไม่ได้ต่อสายอยู่เลย (เช่น เพิ่งเปิดบอท หรือโดนเตะหลุด)
         if vc is None:
             await channel.connect(reconnect=True, timeout=20)
-        elif vc.channel.id != TARGET_CHANNEL_ID:
+            print(f"🏠 ลุงกลับเข้าห้อง {channel.name} แล้วโว้ย")
+
+        # กรณีที่ 2: บอทต่อสายอยู่ แต่ "อยู่ผิดห้อง" (โดนคนลากไป หรือเผลอไปกดเข้าห้องอื่น)
+        elif vc.channel.id != TARGET_ID:
+            # ใช้ move_to เพื่อย้ายห้องทันทีโดยไม่ Disconnect
             await vc.move_to(channel)
+            print(f"🏃 ใครลากกู! ลุงรีบวิ่งกลับเข้าห้อง {channel.name} ทันที")
+
     except Exception as e:
-        print(f"⚠️ Voice Error: {e} | สั่ง Force Disconnect...")
+        # ถ้าพยายามย้ายแล้ว Error (เช่น ห้องเต็ม หรือติด Permission)
+        # ลุงจะลองล้าง Session แล้วต่อใหม่ในรอบหน้า
+        print(f"⚠️ ระบบ Reconnect เอ๋อ: {e}")
         if vc:
-            try: await vc.disconnect(force=True)
-            except: pass
+            try:
+                await vc.disconnect(force=True)
+            except:
+                pass
 
 @bot.event
 async def on_voice_state_update(member, before, after):
