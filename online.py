@@ -79,30 +79,56 @@ async def clear(ctx, amount: int = 5):
         except Exception as e:
             print(f"❌ Clear error: {e}")
 
-# --- [ 📊 ระบบรายงานสุขภาพ (แก้ไข NameError แล้ว) ] ---
+
 @bot.command()
 async def status(ctx):
-    # ดึงค่าชื่อบอทตรงนี้เลย ชัวร์สุดไม่หลุดแน่นอน
+    # ดึงค่าชื่อบอท
     bot_name = os.getenv('BOT_NAME', 'online_bot')
 
+    # 1. คำนวณ Uptime
     current_time = time.time()
     difference = int(round(current_time - start_time))
     text_uptime = str(datetime.timedelta(seconds=difference))
 
+    # 2. อ่านค่าทรัพยากร
     ram = psutil.virtual_memory()
     swap = psutil.swap_memory()
     cpu = psutil.cpu_percent()
+    ping = round(bot.latency * 1000)
 
-    report = (
-        f"**📊 รายงานสุขภาพ (Standby Mode): {bot_name.upper()}**\n"
-        f"---"
-        f"\n⏱️ **เปิดมาแล้ว:** `{text_uptime}`"
-        f"\n🏎️ **ความไว (Ping):** `{round(bot.latency * 1000)}ms`"
-        f"\n🖥️ **CPU:** `{cpu}%`"
-        f"\n🧠 **RAM:** `{ram.used // (1024**2)}MB` / `{ram.total // (1024**2)}MB`"
-        f"\n🔄 **Swap:** `{swap.used // (1024**2)}MB`"
-        f"\n---"
+    # 3. กำหนดสีกรอบตามสุขภาพเครื่อง (เขียว = ปกติ, ส้ม = เริ่มหนัก, แดง = วิกฤต)
+    if cpu > 85 or ram.percent > 90:
+        embed_color = discord.Color.red()
+        status_text = "🔴 วิกฤต (Critical)"
+    elif cpu > 60 or ram.percent > 70:
+        embed_color = discord.Color.orange()
+        status_text = "🟠 เริ่มหนัก (Warning)"
+    else:
+        embed_color = discord.Color.green()
+        status_text = "🟢 ปกติ (Healthy)"
+
+    # 4. สร้างกรอบ Embed
+    embed = discord.Embed(
+        title=f"🖥️ System Status : {bot_name.upper()}",
+        description=f"**สถานะเครื่อง:** {status_text}",
+        color=embed_color,
+        timestamp=datetime.datetime.now()
     )
-    await ctx.send(report)
+
+    # 5. ใส่ข้อมูลแบ่งเป็นคอลัมน์ (inline=True คือให้อยู่บรรทัดเดียวกัน)
+    embed.add_field(name="⏱️ Uptime", value=f"`{text_uptime}`", inline=True)
+    embed.add_field(name="📶 Ping", value=f"`{ping} ms`", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True) # ช่องว่างจัดระเบียบ
+
+    embed.add_field(name="⚙️ CPU Usage", value=f"`{cpu}%`", inline=True)
+    embed.add_field(name="🧠 RAM Usage", value=f"`{ram.used // (1024**2)} / {ram.total // (1024**2)} MB`\n(`{ram.percent}%`)", inline=True)
+    embed.add_field(name="🔄 Swap Memory", value=f"`{swap.used // (1024**2)} MB`", inline=True)
+
+    # ใส่รูปโปรไฟล์คนสั่งไว้ข้างล่างเท่ๆ
+    user_avatar = ctx.author.avatar.url if ctx.author.avatar else ctx.author.default_avatar.url
+    embed.set_footer(text=f"Requested by {ctx.author.display_name}", icon_url=user_avatar)
+
+    # ส่งข้อความ
+    await ctx.send(embed=embed)
 
 bot.run(TOKEN)
