@@ -240,7 +240,7 @@ async def on_voice_state_update(member, before, after):
         # 🔴 กรณี 1: ตรวจพบสายหลุด หรือ โดนเตะ
         if before.channel is not None and after.channel is None:
             bot.is_reconnecting = True
-            info = {"time": time.time(), "type": "drop", "reason": "Connection Dropped or Forcefully Kicked"}
+            info = {"time": time.time(), "type": "drop", "reason": "การเชื่อมต่อหลุดหรือถูกตัดการเชื่อมต่อโดยไม่คาดคิด"}
             if target_channel:
                 try:
                     await target_channel.connect(reconnect=True, timeout=20)
@@ -253,7 +253,7 @@ async def on_voice_state_update(member, before, after):
         # 🟠 กรณี 2: ตรวจพบการโดนลาก
         elif after.channel is not None and after.channel.id != TARGET_ID:
             bot.is_reconnecting = True
-            info = {"time": time.time(), "type": "move", "reason": "Forcefully Moved by User", "dragged_to": after.channel.id}
+            info = {"time": time.time(), "type": "move", "reason": "ถูกย้ายโดยผู้ใช้", "dragged_to": after.channel.id}
             if target_channel:
                 try:
                     await member.move_to(target_channel)
@@ -305,4 +305,4 @@ async def on_ready():
         check_voice_status.start()
         print("✅ ระบบยามเดินตรวจ (Loop) เริ่มทำงานแล้ว!")
 
-bot.run(TOKEN)
+bot.run(TOKEN)  
