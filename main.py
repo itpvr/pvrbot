@@ -13,6 +13,7 @@ from ddgs import DDGS
 # --- [ ⚙️ ดึงค่าจาก Environment Variables ] ---
 TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_API_KEY = "AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM"
+BOT_NAME = os.getenv('BOT_NAME', 'gosu')
 
 if not TOKEN or not GEMINI_API_KEY:
     print(f"❌ Error: ขาด Token หรือ API Key! (เช็คการ export ค่าก่อนรัน)")
