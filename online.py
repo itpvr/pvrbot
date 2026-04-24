@@ -29,116 +29,106 @@ async def on_ready():
         bot.voice_check_task = check_voice_status.start()
         print("🏠 Voice Check Loop Started")
 
-# --- [ ⚡ ชั้นที่ 1: ระบบ Instant Reconnect & Logging ] ---
-LOG_CHANNEL_ID = 1497227431462043708 # ห้องส่ง Log
+# --- [ ⚙️ Global Variables (ห้ามลืม!) ] ---
+TARGET_ID = 1069137562213552128
+LOG_CHANNEL_ID = 1497227431462043708
+bot.disconnect_info = None # เก็บข้อมูลชั่วคราวเพื่อทำ Log
 
-# สร้างความจำชั่วคราวให้บอทเอาไว้จำเวลาหลุด (ใส่ไว้นอกฟังก์ชัน หรือใต้ on_ready ก็ได้)
-bot.last_disconnect_time = None
-bot.disconnect_reason = ""
-
-# --- [ ⚡ ชั้นที่ 1: ระบบ Instant Reconnect & Pro Logging (English UI) ] ---
-LOG_CHANNEL_ID = 1497227431462043708 # ห้องส่ง Log
-
-# เปลี่ยนมาใช้ Dictionary เพื่อเก็บข้อมูลให้ละเอียดขึ้น
-bot.disconnect_info = None
-
+# --- [ ⚡ ชั้นที่ 1: on_voice_state_update (ยามหน้าด่าน - แก้ไขระบบ Loop) ] ---
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # ทำงานเฉพาะตัวบอท
     if member.id == bot.user.id:
-        TARGET_ID = 1069137562213552128
         target_channel = bot.get_channel(TARGET_ID)
+        vc = member.guild.voice_client
 
-        # 🔴 ตรวจจับ 1: สายหลุด หรือ โดนเตะ (Connection Dropped / Kicked)
+        # 🛑 กฎข้อที่ 1: ถ้ากำลังเชื่อมต่ออยู่ (Connecting...) ห้ามทำอะไรทั้งนั้น ปล่อยให้มันทำงานไป
+        if vc and vc.is_connecting():
+            return
+
+        # 🔴 กรณี 1: ตรวจพบสายหลุด หรือ โดนเตะ (Drop / Kick)
         if before.channel is not None and after.channel is None:
             bot.disconnect_info = {
                 "time": time.time(),
                 "type": "drop",
-                "reason": "Connection Dropped or Forcefully Kicked",
-                "dragged_to": None
+                "reason": "การเชื่อมต่อหลุดหรือถูกตัดการเชื่อมต่อโดยไม่คาดคิด"
             }
-            print(f"⚠️ บอทหลุดจากห้องเสียง! กำลังกู้คืน...")
             if target_channel:
-                try: await target_channel.connect(reconnect=True, timeout=10)
-                except: pass
+                try:
+                    # ใช้ timeout นานขึ้นนิดนึง เพื่อให้ UDP เจรจาเสร็จ (กันวนลูป)
+                    await target_channel.connect(reconnect=True, timeout=20)
+                except Exception as e:
+                    print(f"⚠️ Reconnect Error: {e}")
 
-        # 🟠 ตรวจจับ 2: โดนลากไปห้องอื่น (Forcefully Moved)
+        # 🟠 กรณี 2: ตรวจพบการโดนลาก (Moved)
         elif after.channel is not None and after.channel.id != TARGET_ID:
             bot.disconnect_info = {
                 "time": time.time(),
                 "type": "move",
-                "reason": "Forcefully Moved by User",
+                "reason": "ถูกย้ายโดยผู้ใช้",
                 "dragged_to": after.channel.id
             }
-            print(f"⚡ โดนลาก! กำลังวาร์ปกลับ...")
             if target_channel:
-                try: await member.move_to(target_channel)
-                except: pass
+                try:
+                    await member.move_to(target_channel)
+                except Exception as e:
+                    print(f"⚠️ Move Error: {e}")
 
-        # 🟢 ตรวจจับ 3: กลับเข้าห้องเป้าหมายสำเร็จ (Recovery Successful)
+        # 🟢 กรณี 3: กลับเข้าห้องเป้าหมายสำเร็จ (Success & Logging)
         elif after.channel is not None and after.channel.id == TARGET_ID:
-            # ถ้ามีข้อมูลการหลุดบันทึกไว้ ค่อยสร้าง Log
             if getattr(bot, 'disconnect_info', None) is not None:
                 info = bot.disconnect_info
-                downtime = round(time.time() - info["time"], 2) # ทศนิยม 2 ตำแหน่งให้ดูโปร
+                downtime = round(time.time() - info["time"], 2)
                 
                 log_channel = bot.get_channel(LOG_CHANNEL_ID)
                 if log_channel:
-                    # เลือกสีและไอคอนตามสาเหตุ
-                    embed_color = discord.Color.red() if info["type"] == "drop" else discord.Color.gold()
-                    status_icon = "🔴" if info["type"] == "drop" else "🟠"
+                    embed_color = discord.Color.red() if info.get("type") == "drop" else discord.Color.gold()
+                    status_icon = "🔴" if info.get("type") == "drop" else "🟠"
                     
-                    # สร้าง Embed แบบเรียบหรู (Clean Design)
                     embed = discord.Embed(
                         title=f"{status_icon} Voice Connection Restored",
                         color=embed_color,
                         timestamp=datetime.datetime.now()
                     )
-                    
-                    # ใส่รูปโปรไฟล์บอทไว้ด้านบน
-                    avatar_url = member.display_avatar.url if member.display_avatar else None
-                    embed.set_author(name=f"System Alert : {member.display_name}", icon_url=avatar_url)
-                    
-                    # จัดเรียงข้อมูลแบบ Grid
+                    embed.set_author(name=f"System Alert : {member.display_name}", icon_url=member.display_avatar.url if member.display_avatar else None)
                     embed.add_field(name="Trigger Reason", value=f"`{info['reason']}`", inline=False)
                     embed.add_field(name="Recovery Time", value=f"`{downtime} Seconds`", inline=True)
                     embed.add_field(name="Target Channel", value=f"<#{TARGET_ID}>", inline=True)
                     
-                    # ถ้าโดนลาก ให้แฉด้วยว่าลากไปห้องไหน
-                    if info["type"] == "move" and info["dragged_to"]:
-                        embed.add_field(name="Dragged To", value=f"<#{info['dragged_to']}>", inline=False)
-                        
-                    embed.set_footer(text="Automated Recovery Service")
+                    if info.get("dragged_to"):
+                        embed.add_field(name="Dragged From", value=f"<#{info['dragged_to']}>", inline=False)
                     
+                    embed.set_footer(text="Automated Recovery Service (Enhanced)")
                     await log_channel.send(embed=embed)
                 
-                # เคลียร์ความจำทิ้ง เตรียมรับมือรอบต่อไป
+                # เคลียร์ความจำเตรียมรับรอบใหม่
                 bot.disconnect_info = None
-                
-# --- [ 🔄 ชั้นที่ 2: ยามเดินตรวจ (Safety Net) - ปรับเหลือ 2 วินาที ] ---
-@tasks.loop(seconds=2) 
+
+# --- [ 🔄 ชั้นที่ 2: check_voice_status (ยามเดินตรวจ - ปรับปรุงความนิ่ง) ] ---
+@tasks.loop(seconds=15) # ปรับเป็น 15 วินาที เพื่อลดภาระเครื่องและไม่ตีกับ Event
 async def check_voice_status():
     await bot.wait_until_ready()
-    TARGET_ID = 1069137562213552128
     channel = bot.get_channel(TARGET_ID)
     if not channel: return
 
     vc = channel.guild.voice_client
 
-    # ถ้าชั้นที่ 1 (Event) พลาด หรือเน็ตกระตุกจน Event ไม่มา 
-    # ลูปนี้จะช่วยเช็คซ้ำทุก 2 วินาที
+    # 🛑 ตรวจเช็ก: ถ้าไม่ได้เชื่อมต่อ หรือ อยู่ผิดห้อง
     if vc is None or not vc.is_connected() or vc.channel.id != TARGET_ID:
+        
+        # กฎเหล็ก: ถ้าบอทกำลังพยายามต่ออยู่ (Connecting) ให้ยามคนนี้ข้ามไปก่อน
+        if vc and vc.is_connecting():
+            return
+            
         try:
-            if vc and vc.is_connected():
-                await vc.move_to(channel)
-            else:
-                await channel.connect(reconnect=True, timeout=10)
-        except Exception as e:
-            # ถ้าเน่าหนักมาก ให้ล้าง Session ทิ้งเพื่อรอเชื่อมใหม่รอบหน้า
-            if vc: 
-                try: await vc.disconnect(force=True)
-                except: pass
+            # ถ้ามีเศษซากการเชื่อมต่อที่ค้างอยู่ (Ghost) ให้ล้างทิ้งก่อนเริ่มใหม่
+            if vc:
+                await vc.disconnect(force=True)
+                await asyncio.sleep(1) # พักหายใจ 1 วิ ให้ Discord รับรู้
 
+            await channel.connect(reconnect=True, timeout=20)
+            print(f"🔄 [Health Check] Bot returned to {channel.name}")
+        except Exception as e:
+            print(f"❌ [Health Check] Failed to recover: {e}")
 @bot.event
 async def on_voice_state_update(member, before, after):
     pass # ปิดแจ้งเตือนจุกจิก
