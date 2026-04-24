@@ -13,8 +13,7 @@ from ddgs import DDGS
 
 # --- [ ⚙️ Setup ] ---
 TOKEN = os.getenv('DISCORD_TOKEN')
-# แนะนำให้ใช้ os.getenv('GEMINI_API_KEY') นะหลาน เพื่อความปลอดภัย!
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY') 
+GEMINI_API_KEY = "AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM"
 BOT_NAME = os.getenv('BOT_NAME', 'gosu')
 
 if not TOKEN or not GEMINI_API_KEY:
