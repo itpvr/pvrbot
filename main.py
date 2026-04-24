@@ -200,7 +200,7 @@ TARGET_ID = 1069137562213552128
 LOG_CHANNEL_ID = 1497227431462043708
 bot.is_reconnecting = getattr(bot, 'is_reconnecting', False)
 
-# 📝 ฟังก์ชันส่งใบรายงาน (แยกออกมาเพื่อให้เรียกใช้ง่ายๆ)
+# 📝 ฟังก์ชันส่งใบรายงาน
 async def send_recovery_log(member, target_id, info):
     log_channel = bot.get_channel(LOG_CHANNEL_ID)
     if not log_channel: return
@@ -235,7 +235,7 @@ async def on_voice_state_update(member, before, after):
         vc = member.guild.voice_client
 
         if bot.is_reconnecting:
-            return # ถ้ากำลังพยายามกู้คืนอยู่ ห้ามใครกวน!
+            return 
 
         # 🔴 กรณี 1: ตรวจพบสายหลุด หรือ โดนเตะ
         if before.channel is not None and after.channel is None:
@@ -244,12 +244,11 @@ async def on_voice_state_update(member, before, after):
             if target_channel:
                 try:
                     await target_channel.connect(reconnect=True, timeout=20)
-                    # ✅ ส่ง Log ทันทีที่ต่อสำเร็จ!
                     await send_recovery_log(member, TARGET_ID, info)
                 except Exception as e:
                     print(f"⚠️ Reconnect Error: {e}")
                 finally:
-                    bot.is_reconnecting = False # ปลดล็อก
+                    bot.is_reconnecting = False 
 
         # 🟠 กรณี 2: ตรวจพบการโดนลาก
         elif after.channel is not None and after.channel.id != TARGET_ID:
@@ -258,12 +257,11 @@ async def on_voice_state_update(member, before, after):
             if target_channel:
                 try:
                     await member.move_to(target_channel)
-                    # ✅ ส่ง Log ทันทีที่วาร์ปกลับสำเร็จ!
                     await send_recovery_log(member, TARGET_ID, info)
                 except Exception as e:
                     print(f"⚠️ Move Error: {e}")
                 finally:
-                    bot.is_reconnecting = False # ปลดล็อก
+                    bot.is_reconnecting = False 
 
 
 # --- [ 🔄 ชั้นที่ 2: check_voice_status (Loop ยามเดินตรวจ 2 วินาที) ] ---
@@ -276,7 +274,7 @@ async def check_voice_status():
     vc = channel.guild.voice_client
 
     if bot.is_reconnecting:
-        return # ข้ามถ้ายามหน้าด่านทำงานอยู่
+        return 
 
     # 🛑 ถ้าหลุด หรืออยู่ผิดห้อง
     if vc is None or not vc.is_connected() or vc.channel.id != TARGET_ID:
@@ -290,7 +288,6 @@ async def check_voice_status():
 
             await channel.connect(reconnect=True, timeout=20)
             
-            # ✅ ถ้า Loop เป็นคนดึงกลับมา ก็ส่ง Log ให้รู้ด้วยว่าฮีลตัวเอง!
             info = {"time": start_time, "type": "drop", "reason": "Recovered by Auto-Heal Loop (Background Check)"}
             await send_recovery_log(channel.guild.me, TARGET_ID, info)
             print(f"🔄 [Loop] Recovered successfully.")
@@ -298,5 +295,14 @@ async def check_voice_status():
             print(f"❌ [Loop] Recovery failed: {e}")
         finally:
             bot.is_reconnecting = False
+
+# --- [ 🚀 กุญแจสตาร์ทเครื่อง (ที่หายไป!) ] ---
+@bot.event
+async def on_ready():
+    print(f'🚀 บอท {bot.user} ออนไลน์แล้วโว้ย!')
+    # สั่งให้ยามเดินตรวจเริ่มทำงานทันทีที่เปิดบอท
+    if not check_voice_status.is_running():
+        check_voice_status.start()
+        print("✅ ระบบยามเดินตรวจ (Loop) เริ่มทำงานแล้ว!")
 
 bot.run(TOKEN)
