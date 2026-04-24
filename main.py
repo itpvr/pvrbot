@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 import os
 import sys
@@ -10,13 +11,13 @@ import sqlite3
 import google.generativeai as genai
 from ddgs import DDGS
 
-# --- [ ⚙️ ดึงค่าจาก Environment Variables ] ---
+# --- [ ⚙️ Setup ] ---
 TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_API_KEY = "AIzaSyCkrqzxWa0aEWsnPhudtqAQAChgHf2afsM"
 BOT_NAME = os.getenv('BOT_NAME', 'gosu')
 
 if not TOKEN or not GEMINI_API_KEY:
-    print(f"❌ Error: ขาด Token หรือ API Key! (เช็คการ export ค่าก่อนรัน)")
+    print(f"❌ Error: ขาด Token หรือ API Key!")
     sys.exit()
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -25,13 +26,23 @@ model = genai.GenerativeModel('gemini-flash-lite-latest')
 start_time = time.time()
 TARGET_CHANNEL_ID = 1069137562213552128 
 
-intents = discord.Intents.default()
-intents.voice_states = True
-intents.message_content = True
-intents.messages = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+class MyBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.voice_states = True
+        # Slash Command ไม่จำเป็นต้องใช้ message_content แล้ว แต่เปิดไว้เผื่อฟีเจอร์อื่น
+        intents.message_content = True 
+        super().__init__(command_prefix="!", intents=intents)
 
-# --- [ ⚡ Database สมองลุงอ๊อด ] ---
+    async def setup_hook(self):
+        # ทำการ Sync Slash Commands เข้ากับเซิร์ฟเวอร์
+        # (ใน Production จริงๆ อาจจะใช้เวลานิดหน่อยในการอัปเดตทั่วโลก)
+        await self.tree.sync()
+        print(f"✅ Slash Commands Synced for {self.user}")
+
+bot = MyBot()
+
+# --- [ ⚡ Database ] ---
 db_filename = f'brain_{BOT_NAME}.db'
 conn = sqlite3.connect(db_filename)
 c = conn.cursor()
@@ -48,29 +59,21 @@ def load_from_db(channel_id):
     c.execute("SELECT role, content FROM memory WHERE channel_id = ? ORDER BY rowid ASC", (str(channel_id),))
     return c.fetchall()
 
-# --- [ ⚡ ระบบค้นหาข้อมูล (Async) ] ---
+# --- [ ⚡ Search ] ---
 def _sync_search(query):
     try:
         with DDGS() as ddgs:
-            refined_query = f"{query} ข้อมูลล่าสุดปี 2026"
-            return [r for r in ddgs.text(refined_query, max_results=3)]
-    except:
-        return []
+            return [r for r in ddgs.text(f"{query} ข้อมูลล่าสุดปี 2026", max_results=3)]
+    except: return []
 
 async def pro_search(query):
     results = await asyncio.to_thread(_sync_search, query)
     if not results: return "ไม่พบข้อมูลใหม่ในอินเทอร์เน็ต"
     context = "⚠️ ข้อมูลสดจากเน็ต (2026):\n"
-    for res in results:
-        context += f"- {res['body']}\n"
+    for res in results: context += f"- {res['body']}\n"
     return context
 
-@bot.event
-async def on_ready():
-    print(f'✅ ออนไลน์: {bot.user} | ฐานข้อมูล: {db_filename}')
-    if not hasattr(bot, 'voice_check_task') or not bot.voice_check_task.is_running():
-        bot.voice_check_task = check_voice_status.start()
-
+# --- [ 🎤 Voice Check ] ---
 @tasks.loop(seconds=10)
 async def check_voice_status():
     await bot.wait_until_ready()
@@ -78,164 +81,137 @@ async def check_voice_status():
     if not channel: return
     vc = channel.guild.voice_client
     try:
-        if not vc:
-            await channel.connect(reconnect=True, timeout=20)
-        elif vc.channel.id != TARGET_CHANNEL_ID:
-            await vc.move_to(channel)
+        if not vc: await channel.connect(reconnect=True, timeout=20)
+        elif vc.channel.id != TARGET_CHANNEL_ID: await vc.move_to(channel)
     except Exception as e:
         if vc:
             try: await vc.disconnect(force=True)
             except: pass
 
-@bot.command(aliases=['ood', 'ลุง'])
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def ask(ctx, *, question: str = ""):
-    async with ctx.typing():
-        channel_id = str(ctx.channel.id)
-        now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
-        current_time_str = now.strftime("%d/%m/%Y %H:%M")
+@bot.event
+async def on_ready():
+    if not hasattr(bot, 'voice_check_task') or not bot.voice_check_task.is_running():
+        bot.voice_check_task = check_voice_status.start()
+    print(f'🚀 {bot.user} พร้อมลุยในระบบ Slash Command!')
 
-        image_data = None
-        if ctx.message.attachments:
-            att = ctx.message.attachments[0]
-            if att.content_type.startswith('image/'):
-                image_bytes = await att.read()
-                image_data = {"mime_type": att.content_type, "data": image_bytes}
-                if not question: question = "วิเคราะห์รูปนี้หน่อย"
+# --- [ 💬 Slash Command: /ask ] ---
+@bot.tree.command(name="ask", description="ถามปัญหาชีวิตหรือให้ลุงช่วยหาข้อมูลจากเน็ต")
+@app_commands.describe(question="พิมพ์คำถามที่นี่", image="ส่งรูปให้ลุงดู (ถ้ามี)")
+async def ask(interaction: discord.Interaction, question: str = "", image: discord.Attachment = None):
+    # เนื่องจากการประมวลผล AI นานเกิน 3 วิ ต้องใช้ defer
+    await interaction.response.defer()
+    
+    channel_id = str(interaction.channel_id)
+    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
+    current_time_str = now.strftime("%d/%m/%Y %H:%M")
 
-        if not question and not image_data:
-            return await ctx.send("จะถามอะไรก็พิมพ์มาสิโว้ย!")
+    image_data = None
+    if image:
+        if image.content_type.startswith('image/'):
+            image_bytes = await image.read()
+            image_data = {"mime_type": image.content_type, "data": image_bytes}
+            if not question: question = "วิเคราะห์รูปนี้หน่อยลุง"
+        else:
+            await interaction.followup.send("ไอ้หลาน! ส่งมาได้แค่รูปภาพนะโว้ย")
+            return
 
-        search_res = await pro_search(question)
-        history = load_from_db(channel_id)
-        h_text = ""
-        for role, content in history:
-            h_text += f"{'หลาน' if role == 'user' else 'ลุง'}: {content}\n"
+    if not question and not image_data:
+        await interaction.followup.send("จะถามอะไรก็พิมพ์มาสิโว้ย!")
+        return
 
-        prompt = (
-            f"คุณคือ 'ลุงอ๊อด' AI ที่ฉลาดระดับกูเกิลแต่ติดดิน \n"
-            f"เวลาตอนนี้: {current_time_str}\n\n"
-            f"🎯 สไตล์:\n"
-            f"- สั้น กระชับ กวนตีนนิดๆ แทนตัวเองกู/มึง แต่มีกาลเทศะ\n"
-            f"- ถ้ามีคนถามว่าลุงเป็นใคร หรือใครสร้างลุงมา ให้ตอบอย่างภูมิใจเลยว่า 'PVR เป็นคนสร้างกูขึ้นมาเว้ย เพื่อวิเคราะข้อมูลต่างๆ และ ค้นหาได้ทุกอย่าง ตอบปัญหา!'\n"
-            f"- ถ้ามีรูปภาพส่งมา ให้วิจารณ์รูปภาพนั้นตามสไตล์ลุง\n\n"
-            f"🔍 ข้อมูลเน็ต: {search_res}\n\n"
-            f"📖 ประวัติ: {h_text}\n"
-            f"💬 คำถาม: {question}"
-        )
+    search_res = await pro_search(question)
+    history = load_from_db(channel_id)
+    h_text = ""
+    for role, content in history:
+        h_text += f"{'หลาน' if role == 'user' else 'ลุง'}: {content}\n"
 
-        try:
-            content_list = [prompt]
-            if image_data: content_list.append(image_data)
-            
-            response = await model.generate_content_async(content_list, request_options={'timeout': 60})
-            answer = response.text
-            
-            save_to_db(channel_id, "user", question)
-            save_to_db(channel_id, "model", answer)
+    prompt = (
+        f"คุณคือ 'ลุงอ๊อด' AI ที่ฉลาดระดับกูเกิลแต่ติดดิน \n"
+        f"เวลาตอนนี้: {current_time_str}\n\n"
+        f"🎯 สไตล์:\n"
+        f"- สั้น กระชับ กวนตีนนิดๆ แทนตัวเองกู/มึง แต่มีกาลเทศะ\n"
+        f"- ถ้ามีคนถามว่าลุงเป็นใคร ให้ตอบว่า 'PVR เป็นคนสร้างกูขึ้นมาเว้ย เพื่อวิเคราะห์ข้อมูลและค้นหาได้ทุกอย่าง!'\n"
+        f"🔍 ข้อมูลเน็ต: {search_res}\n"
+        f"📖 ประวัติ: {h_text}\n"
+        f"💬 คำถาม: {question}"
+    )
 
+    try:
+        content_list = [prompt]
+        if image_data: content_list.append(image_data)
+        
+        response = await model.generate_content_async(content_list, request_options={'timeout': 60})
+        answer = response.text
+        
+        save_to_db(channel_id, "user", question)
+        save_to_db(channel_id, "model", answer)
+
+        # ใช้ followup.send แทน response.send_message เมื่อใช้ defer
+        if len(answer) > 2000:
             for i in range(0, len(answer), 2000):
-                await ctx.send(answer[i:i+2000])
-        except Exception as e:
-            print(f"Gemini Error: {e}")
-            await ctx.send("สมองลุงช็อตว่ะ ลองถามใหม่ซิ!")
+                await interaction.followup.send(answer[i:i+2000])
+        else:
+            await interaction.followup.send(answer)
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        await interaction.followup.send("สมองลุงช็อตว่ะ ลองถามใหม่ซิ!")
 
-# --- [ 🛠️ คำสั่งกลุ่ม PVR ] ---
-@bot.group(name="pvr", invoke_without_command=True)
-async def pvr(ctx):
-    if ctx.author.id == 431421372133277698:
-        try:
-            await ctx.message.delete()
-        except:
-            pass
-
-@pvr.command(name="say")
-async def say(ctx, *, message: str):
-    if ctx.author.id == 431421372133277698:
-        try:
-            await ctx.message.delete()
-            await ctx.send(message)
-        except Exception as e:
-            await ctx.send(message)
-            print(f"⚠️ Error: {e}")
-
-@pvr.command(name="clear")
-async def clear(ctx, amount: int = 5):
-    if ctx.author.id == 431421372133277698:
-        try:
-            deleted = await ctx.channel.purge(limit=amount + 1)
-            await ctx.send(f"🧹 ล้างให้แล้ว {len(deleted)-1} ข้อความ", delete_after=3)
-        except Exception as e:
-            print(f"❌ Clear error: {e}")
-
-
-# --- [ 📊 รายงานสุขภาพเวอร์ชัน ลุงอ๊อด (Embed + DB Status) ] ---
-@bot.command()
-async def status(ctx):
-    # ดึงค่าชื่อบอท
+# --- [ 📊 Slash Command: /status ] ---
+@bot.tree.command(name="status", description="เช็กสุขภาพเครื่องเซิร์ฟเวอร์")
+async def status(interaction: discord.Interaction):
     bot_name = os.getenv('BOT_NAME', 'gosu')
-
-    # 1. คำนวณ Uptime
     current_time = time.time()
-    difference = int(round(current_time - start_time))
-    text_uptime = str(datetime.timedelta(seconds=difference))
-
-    # 2. อ่านค่าทรัพยากรเครื่อง
+    uptime = str(datetime.timedelta(seconds=int(round(current_time - start_time))))
+    
     ram = psutil.virtual_memory()
     swap = psutil.swap_memory()
     cpu = psutil.cpu_percent()
     ping = round(bot.latency * 1000)
 
-    # 3. เช็กขนาดไฟล์ Database (สมองของลุง)
-    try:
-        db_size = os.path.getsize(db_filename) / 1024  # แปลงเป็น KB
-    except:
-        db_size = 0
+    try: db_size = os.path.getsize(db_filename) / 1024
+    except: db_size = 0
 
-    # 4. กำหนดสีกรอบตามโหลดเครื่อง
-    if cpu > 85 or ram.percent > 90:
-        embed_color = discord.Color.red()
-        status_text = "🔴 วิกฤต (Critical)"
-    elif cpu > 60 or ram.percent > 70:
-        embed_color = discord.Color.orange()
-        status_text = "🟠 เริ่มหนัก (Warning)"
-    else:
-        embed_color = discord.Color.green()
-        status_text = "🟢 ปกติ (Healthy)"
+    if cpu > 85 or ram.percent > 90: embed_color = discord.Color.red()
+    elif cpu > 60 or ram.percent > 70: embed_color = discord.Color.orange()
+    else: embed_color = discord.Color.green()
 
-    # 5. สร้าง Embed
-    embed = discord.Embed(
-        title=f"🖥️ System Status : {bot_name.upper()}",
-        description=f"**สถานะเครื่อง:** {status_text}",
-        color=embed_color,
-        timestamp=datetime.datetime.now()
-    )
-
-    # แถวที่ 1: ข้อมูลพื้นฐาน
-    embed.add_field(name="⏱️ Uptime", value=f"`{text_uptime}`", inline=True)
+    embed = discord.Embed(title=f"🖥️ System Status : {bot_name.upper()}", color=embed_color, timestamp=datetime.datetime.now())
+    embed.add_field(name="⏱️ Uptime", value=f"`{uptime}`", inline=True)
     embed.add_field(name="📶 Ping", value=f"`{ping} ms`", inline=True)
     embed.add_field(name="📖 DB Size", value=f"`{db_size:.2f} KB`", inline=True)
-
-    # แถวที่ 2: ทรัพยากรระบบ
     embed.add_field(name="⚙️ CPU Usage", value=f"`{cpu}%`", inline=True)
-    embed.add_field(name="🧠 RAM Usage", value=f"`{ram.used // (1024**2)} / {ram.total // (1024**2)} MB` (`{ram.percent}%`)", inline=True)
+    embed.add_field(name="🧠 RAM Usage", value=f"`{ram.used // (1024**2)} MB` (`{ram.percent}%`)", inline=True)
     embed.add_field(name="🔄 Swap Memory", value=f"`{swap.used // (1024**2)} MB`", inline=True)
 
-    # ใส่รูปโปรไฟล์คนสั่ง
-    user_avatar = ctx.author.avatar.url if ctx.author.avatar else ctx.author.default_avatar.url
-    embed.set_footer(text=f"Requested by {ctx.author.display_name}", icon_url=user_avatar)
+    await interaction.response.send_message(embed=embed)
 
-    await ctx.send(embed=embed)
+# --- [ 🛠️ Slash Command Group: /pvr ] ---
+class PVRGroup(app_commands.Group, name="pvr", description="คำสั่งสำหรับผู้สร้างเท่านั้น"):
+    @app_commands.command(name="say", description="สั่งให้บอทพูดแทน")
+    async def say(self, interaction: discord.Interaction, message: str):
+        if interaction.user.id == 431421372133277698:
+            await interaction.channel.send(message)
+            await interaction.response.send_message("ส่งข้อความแล้วโว้ย!", ephemeral=True)
+        else:
+            await interaction.response.send_message("มึงไม่ใช่ PVR อย่าเนียน!", ephemeral=True)
 
-@bot.command()
-async def forget(ctx):
-    c.execute("DELETE FROM memory WHERE channel_id = ?", (str(ctx.channel.id),))
+    @app_commands.command(name="clear", description="ล้างประวัติแชท")
+    async def clear(self, interaction: discord.Interaction, amount: int = 5):
+        if interaction.user.id == 431421372133277698:
+            await interaction.response.defer(ephemeral=True)
+            deleted = await interaction.channel.purge(limit=amount)
+            await interaction.followup.send(f"🧹 ล้างให้แล้ว {len(deleted)} ข้อความ", ephemeral=True)
+        else:
+            await interaction.response.send_message("ไม่มีสิทธิ์โว้ย!", ephemeral=True)
+
+# เพิ่มกลุ่มคำสั่ง pvr เข้าไปใน tree
+bot.tree.add_command(PVRGroup())
+
+# --- [ 🧹 Slash Command: /forget ] ---
+@bot.tree.command(name="forget", description="ล้างสมองลุงอ๊อดในห้องนี้")
+async def forget(interaction: discord.Interaction):
+    c.execute("DELETE FROM memory WHERE channel_id = ?", (str(interaction.channel_id),))
     conn.commit()
-    await ctx.send("🧹 ลุงลืมหมดแล้วว่าคุยอะไรกัน!")
-
-@ask.error
-async def ask_error(ctx, error):
-    if isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"⏳ ใจเย็น! รออีก {round(error.retry_after, 1)} วิ", delete_after=5)
+    await interaction.response.send_message("🧹 ลุงลืมหมดแล้วว่าคุยอะไรกัน!")
 
 bot.run(TOKEN)
