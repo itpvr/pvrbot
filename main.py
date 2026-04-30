@@ -61,7 +61,7 @@ async def pro_search(query):
 class OodGroup(app_commands.Group, name="ood", description="คำสั่งทั้งหมดของลุงอ๊อด"):
     
     # 1. /ood question
-    @app_commands.command(name="question", description="ถามปัญหาลุงอ๊อด หรือให้วิเคราะห์รูป")
+    @app_commands.command(name="ask", description="ถามปัญหาลุงอ๊อด หรือให้วิเคราะห์รูป")
     @app_commands.describe(question="พิมพ์คำถามที่นี่", image="ส่งรูปให้ลุงดู (ถ้ามี)")
     async def question(self, interaction: discord.Interaction, question: str = "", image: discord.Attachment = None):
         await interaction.response.defer()
