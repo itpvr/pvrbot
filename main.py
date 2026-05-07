@@ -24,7 +24,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-flash-lite-latest')
 
 start_time = time.time()
-TARGET_ID = 1069137562213552128 
+TARGET_ID = 1461009670029447432 
 LOG_CHANNEL_ID = 1497227431462043708
 
 # --- [ ⚡ Database ] ---
