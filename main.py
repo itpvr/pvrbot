@@ -21,7 +21,7 @@ if not TOKEN or not GEMINI_API_KEY:
     sys.exit()
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-flash-lite-latest')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 start_time = time.time()
 TARGET_ID = 1461009670029447432 
