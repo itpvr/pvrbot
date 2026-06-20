@@ -161,14 +161,10 @@ async def pro_search(query: str) -> str:
 
 
 # =========================
-# AI Text Function
+# Text AI Function
 # =========================
 
-async def ask_lung_ood(
-    question: str,
-    channel_id: int,
-    image_data=None
-) -> str:
+async def ask_lung_ood(question: str, channel_id: int, image_data=None) -> str:
     now = datetime.datetime.now(
         datetime.timezone(datetime.timedelta(hours=7))
     )
@@ -189,7 +185,6 @@ async def ask_lung_ood(
 เวลาปัจจุบัน: {current_time_str}
 
 บุคลิก:
-- เป็นผู้เชี่ยวชาญที่ฉลาด วิเคราะห์ดี และตอบตรงประเด็น
 - ใช้สรรพนามแทนตัวเองว่า "ลุง"
 - เรียกคู่สนทนาว่า "หลาน"
 - สุภาพ เป็นกันเอง
@@ -235,13 +230,13 @@ async def ask_lung_ood(
 
 
 # =========================
-# Voice Utilities
+# Voice Audio Source
 # =========================
 
 class PCMQueueAudioSource(discord.AudioSource):
     """
-    Discord voice output format:
-    48kHz, stereo, signed 16-bit PCM, 20ms frame = 3840 bytes
+    Discord output PCM:
+    48kHz stereo signed 16-bit, 20ms = 3840 bytes
     """
 
     FRAME_SIZE = 3840
@@ -288,11 +283,9 @@ class PCMQueueAudioSource(discord.AudioSource):
 
 class AudioResampler:
     """
-    ใช้ audioop เพื่อลดภาระเครื่อง:
-    - Discord input: 48k stereo PCM16
-    - OpenAI input: 24k mono PCM16
-    - OpenAI output: 24k mono PCM16
-    - Discord output: 48k stereo PCM16
+    Discord input: 48k stereo PCM16
+    OpenAI input/output: 24k mono PCM16
+    Discord output: 48k stereo PCM16
     """
 
     def __init__(self):
@@ -300,43 +293,31 @@ class AudioResampler:
         self.to_discord_state = None
 
     def discord_to_ai(self, pcm48_stereo: bytes) -> bytes:
-        if not pcm48_stereo:
-            return b""
-
         try:
             mono48 = audioop.tomono(pcm48_stereo, 2, 0.5, 0.5)
             mono24, self.to_ai_state = audioop.ratecv(
-                mono48,
-                2,
-                1,
-                48000,
-                24000,
-                self.to_ai_state
+                mono48, 2, 1, 48000, 24000, self.to_ai_state
             )
             return mono24
         except Exception as e:
-            print(f"discord_to_ai resample error: {e}")
+            print(f"discord_to_ai error: {e}")
             return b""
 
     def ai_to_discord(self, pcm24_mono: bytes) -> bytes:
-        if not pcm24_mono:
-            return b""
-
         try:
             mono48, self.to_discord_state = audioop.ratecv(
-                pcm24_mono,
-                2,
-                1,
-                24000,
-                48000,
-                self.to_discord_state
+                pcm24_mono, 2, 1, 24000, 48000, self.to_discord_state
             )
             stereo48 = audioop.tostereo(mono48, 2, 1.0, 1.0)
             return stereo48
         except Exception as e:
-            print(f"ai_to_discord resample error: {e}")
+            print(f"ai_to_discord error: {e}")
             return b""
 
+
+# =========================
+# OpenAI Realtime Voice
+# =========================
 
 class OpenAIRealtimeVoice:
     def __init__(self):
@@ -456,10 +437,7 @@ class OpenAIRealtimeVoice:
                 event = json.loads(raw)
                 event_type = event.get("type")
 
-                if event_type in (
-                    "response.audio.delta",
-                    "response.output_audio.delta",
-                ):
+                if event_type in ("response.audio.delta", "response.output_audio.delta"):
                     delta = event.get("delta")
                     if delta:
                         pcm = base64.b64decode(delta)
@@ -469,13 +447,8 @@ class OpenAIRealtimeVoice:
                         except queue.Full:
                             pass
 
-                elif event_type == "response.text.delta":
-                    delta = event.get("delta", "")
-                    if delta:
-                        print(delta, end="", flush=True)
-
                 elif event_type == "response.done":
-                    print("\n✅ Realtime response done")
+                    print("✅ Realtime response done")
 
                 elif event_type == "error":
                     print("❌ OpenAI realtime error:", event)
@@ -494,6 +467,10 @@ class OpenAIRealtimeVoice:
         if self.ws:
             await self.ws.close()
 
+
+# =========================
+# Voice Receive Session
+# =========================
 
 class RealtimeAudioSink(voice_recv.AudioSink):
     def __init__(self, session):
@@ -535,24 +512,24 @@ class VoiceSession:
         self.tasks = []
 
     async def join(self, channel: discord.VoiceChannel):
-        if self.voice_client and self.voice_client.is_connected():
-            await self.voice_client.move_to(channel)
-        else:
-            self.voice_client = await channel.connect(
-                cls=voice_recv.VoiceRecvClient,
-                self_deaf=False,
-                self_mute=False,
-                timeout=20,
-                reconnect=True,
-            )
+        existing = channel.guild.voice_client
+
+        if existing and existing.is_connected():
+            await existing.disconnect(force=True)
+            await asyncio.sleep(1)
+
+        self.voice_client = await channel.connect(
+            cls=voice_recv.VoiceRecvClient,
+            self_deaf=False,
+            self_mute=False,
+            timeout=20,
+            reconnect=True,
+        )
 
         if not self.realtime.connected:
             await self.realtime.connect()
 
-        try:
-            self.voice_client.listen(RealtimeAudioSink(self))
-        except Exception as e:
-            print(f"listen error: {e}")
+        self.voice_client.listen(RealtimeAudioSink(self))
 
         if not self.voice_client.is_playing():
             self.voice_client.play(self.source)
@@ -562,9 +539,6 @@ class VoiceSession:
             self.tasks.append(asyncio.create_task(self.ai_to_discord_loop()))
 
     def feed_user_audio(self, user_id: int, pcm48_stereo: bytes):
-        """
-        รับทีละ 1 speaker ป้องกันเสียงหลายคนปนกันบน e2-micro
-        """
         if self.active_user_id is None:
             self.active_user_id = user_id
 
@@ -658,14 +632,8 @@ class OodGroup(app_commands.Group):
             description="คำสั่งทั้งหมดของลุงอ๊อด"
         )
 
-    @app_commands.command(
-        name="ask",
-        description="ถามปัญหาลุงอ๊อด หรือให้วิเคราะห์รูป"
-    )
-    @app_commands.describe(
-        question="พิมพ์คำถามที่นี่",
-        image="ส่งรูปให้ลุงดู ถ้ามี"
-    )
+    @app_commands.command(name="ask", description="ถามปัญหาลุงอ๊อด หรือให้วิเคราะห์รูป")
+    @app_commands.describe(question="พิมพ์คำถามที่นี่", image="ส่งรูปให้ลุงดู ถ้ามี")
     async def ask(
         self,
         interaction: discord.Interaction,
@@ -706,15 +674,10 @@ class OodGroup(app_commands.Group):
         else:
             await interaction.followup.send(answer)
 
-    @app_commands.command(
-        name="status",
-        description="เช็กสุขภาพเครื่องเซิร์ฟเวอร์"
-    )
+    @app_commands.command(name="status", description="เช็กสุขภาพเครื่องเซิร์ฟเวอร์")
     async def status(self, interaction: discord.Interaction):
         current_time = time.time()
-        uptime = str(
-            datetime.timedelta(seconds=int(current_time - start_time))
-        )
+        uptime = str(datetime.timedelta(seconds=int(current_time - start_time)))
 
         ram = psutil.virtual_memory()
         swap = psutil.swap_memory()
@@ -760,10 +723,7 @@ class OodGroup(app_commands.Group):
 
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(
-        name="forget",
-        description="ล้างความจำของลุงในห้องนี้ เฉพาะ PVR"
-    )
+    @app_commands.command(name="forget", description="ล้างความจำของลุงในห้องนี้ เฉพาะ PVR")
     async def forget(self, interaction: discord.Interaction):
         if interaction.user.id != OWNER_ID:
             await interaction.response.send_message(
@@ -783,10 +743,7 @@ class OodGroup(app_commands.Group):
             ephemeral=True
         )
 
-    @app_commands.command(
-        name="say",
-        description="สั่งให้บอทพูดแทน เฉพาะ PVR"
-    )
+    @app_commands.command(name="say", description="สั่งให้บอทพูดแทน เฉพาะ PVR")
     async def say(self, interaction: discord.Interaction, message: str):
         if interaction.user.id != OWNER_ID:
             await interaction.response.send_message(
@@ -801,10 +758,7 @@ class OodGroup(app_commands.Group):
             ephemeral=True
         )
 
-    @app_commands.command(
-        name="clear",
-        description="ล้างประวัติแชท เฉพาะ PVR"
-    )
+    @app_commands.command(name="clear", description="ล้างประวัติแชท เฉพาะ PVR")
     async def clear(self, interaction: discord.Interaction, amount: int = 5):
         if interaction.user.id != OWNER_ID:
             await interaction.response.send_message(
@@ -814,7 +768,6 @@ class OodGroup(app_commands.Group):
             return
 
         await interaction.response.defer(ephemeral=True)
-
         amount = max(1, min(amount, 50))
 
         try:
@@ -841,7 +794,41 @@ class VoiceGroup(app_commands.Group):
             description="คำสั่งโหมดเสียงของลุงอ๊อด"
         )
 
-    @app_commands.command(name="join", description="ให้ลุงอ๊อดเข้าห้องเสียง")
+    @app_commands.command(name="join_test", description="ทดสอบให้บอทเข้าห้องเสียงแบบไม่ต่อ AI")
+    async def join_test(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            await interaction.followup.send(
+                "หลานต้องเข้าห้องเสียงก่อนนะครับ",
+                ephemeral=True
+            )
+            return
+
+        channel = interaction.user.voice.channel
+
+        try:
+            vc = interaction.guild.voice_client
+
+            if vc and vc.is_connected():
+                await vc.move_to(channel)
+            else:
+                await channel.connect(timeout=20, reconnect=True)
+
+            await interaction.followup.send(
+                f"✅ join_test สำเร็จ ลุงเข้าห้อง `{channel.name}` แล้วครับ",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            await interaction.followup.send(
+                f"❌ join_test ไม่สำเร็จ: `{type(e).__name__}: {e}`",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="join", description="ให้ลุงอ๊อดเข้าห้องเสียงพร้อมระบบ AI")
     async def join(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
@@ -875,25 +862,12 @@ class VoiceGroup(app_commands.Group):
                 ephemeral=True
             )
         except Exception as e:
-            print(f"voice join error: {e}")
+            import traceback
+            traceback.print_exc()
             await interaction.followup.send(
-                f"❌ เข้าห้องเสียงไม่สำเร็จ: `{e}`",
+                f"❌ เข้าห้องเสียงไม่สำเร็จ: `{type(e).__name__}: {e}`",
                 ephemeral=True
             )
-
-    @app_commands.command(name="leave", description="ให้ลุงอ๊อดออกจากห้องเสียง")
-    async def leave(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-
-        session = voice_sessions.pop(interaction.guild_id, None)
-
-        if session:
-            await session.leave()
-
-        await interaction.followup.send(
-            "👋 ลุงออกจากห้องเสียงแล้วครับ",
-            ephemeral=True
-        )
 
     @app_commands.command(name="talk", description="ให้ลุงพูดข้อความผ่านเสียง")
     async def talk(self, interaction: discord.Interaction, text: str):
@@ -915,9 +889,38 @@ class VoiceGroup(app_commands.Group):
                 ephemeral=True
             )
         except Exception as e:
-            print(f"voice talk error: {e}")
+            import traceback
+            traceback.print_exc()
             await interaction.followup.send(
-                f"❌ พูดไม่สำเร็จ: `{e}`",
+                f"❌ พูดไม่สำเร็จ: `{type(e).__name__}: {e}`",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="leave", description="ให้ลุงอ๊อดออกจากห้องเสียง")
+    async def leave(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        session = voice_sessions.pop(interaction.guild_id, None)
+
+        if session:
+            await session.leave()
+            await interaction.followup.send(
+                "👋 ลุงออกจากห้องเสียงแล้วครับ",
+                ephemeral=True
+            )
+            return
+
+        vc = interaction.guild.voice_client
+
+        if vc and vc.is_connected():
+            await vc.disconnect(force=True)
+            await interaction.followup.send(
+                "👋 ลุงออกจากห้องเสียงแล้วครับ",
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                "ลุงไม่ได้อยู่ในห้องเสียงครับ",
                 ephemeral=True
             )
 
@@ -971,7 +974,7 @@ bot = MyBot()
 
 
 # =========================
-# Voice Auto Recovery
+# Recovery Log
 # =========================
 
 async def send_recovery_log(status_type: str, reason: str):
