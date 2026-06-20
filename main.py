@@ -296,7 +296,12 @@ class AudioResampler:
         try:
             mono48 = audioop.tomono(pcm48_stereo, 2, 0.5, 0.5)
             mono24, self.to_ai_state = audioop.ratecv(
-                mono48, 2, 1, 48000, 24000, self.to_ai_state
+                mono48,
+                2,
+                1,
+                48000,
+                24000,
+                self.to_ai_state
             )
             return mono24
         except Exception as e:
@@ -306,7 +311,12 @@ class AudioResampler:
     def ai_to_discord(self, pcm24_mono: bytes) -> bytes:
         try:
             mono48, self.to_discord_state = audioop.ratecv(
-                pcm24_mono, 2, 1, 24000, 48000, self.to_discord_state
+                pcm24_mono,
+                2,
+                1,
+                24000,
+                48000,
+                self.to_discord_state
             )
             stereo48 = audioop.tostereo(mono48, 2, 1.0, 1.0)
             return stereo48
@@ -622,7 +632,7 @@ class VoiceSession:
 
 
 # =========================
-# Slash Commands: OOD
+# Slash Commands: /ood
 # =========================
 
 class OodGroup(app_commands.Group):
@@ -782,19 +792,7 @@ class OodGroup(app_commands.Group):
                 ephemeral=True
             )
 
-
-# =========================
-# Slash Commands: Voice
-# =========================
-
-class VoiceGroup(app_commands.Group):
-    def __init__(self):
-        super().__init__(
-            name="voice",
-            description="คำสั่งโหมดเสียงของลุงอ๊อด"
-        )
-
-    @app_commands.command(name="join_test", description="ทดสอบให้บอทเข้าห้องเสียงแบบไม่ต่อ AI")
+    @app_commands.command(name="join_test", description="ทดสอบให้ลุงเข้าห้องเสียงแบบไม่ต่อ AI")
     async def join_test(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
@@ -877,7 +875,7 @@ class VoiceGroup(app_commands.Group):
 
         if not session:
             await interaction.followup.send(
-                "ลุงยังไม่ได้อยู่ในห้องเสียงครับ ใช้ `/voice join` ก่อนนะ",
+                "ลุงยังไม่ได้อยู่ในห้องเสียงครับ ใช้ `/ood join` ก่อนนะ",
                 ephemeral=True
             )
             return
@@ -956,18 +954,13 @@ class MyBot(commands.Bot):
         except app_commands.CommandAlreadyRegistered:
             print("⚠️ OodGroup already registered, skip add_command")
 
-        try:
-            self.tree.add_command(VoiceGroup())
-        except app_commands.CommandAlreadyRegistered:
-            print("⚠️ VoiceGroup already registered, skip add_command")
-
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             synced = await self.tree.sync(guild=guild)
-            print(f"✅ Guild Slash Commands Synced: {len(synced)} commands")
+            print(f"✅ Guild Slash Commands Synced: {len(synced)} top-level commands")
         else:
             synced = await self.tree.sync()
-            print(f"✅ Global Slash Commands Synced: {len(synced)} commands")
+            print(f"✅ Global Slash Commands Synced: {len(synced)} top-level commands")
 
 
 bot = MyBot()
