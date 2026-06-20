@@ -11,6 +11,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
+
 import google.generativeai as genai
 from ddgs import DDGS
 
@@ -25,6 +26,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 BOT_NAME = os.getenv("BOT_NAME", "gosu")
 
+GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 TARGET_VOICE_CHANNEL_ID = int(os.getenv("TARGET_VOICE_CHANNEL_ID", "0"))
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
@@ -438,9 +440,18 @@ class MyBot(commands.Bot):
         )
 
     async def setup_hook(self):
+    try:
         self.tree.add_command(OodGroup())
-        await self.tree.sync()
-        print(f"✅ Slash commands synced for {self.user}")
+    except app_commands.CommandAlreadyRegistered:
+        print("⚠️ OodGroup already registered, skip add_command")
+
+    if GUILD_ID:
+        guild = discord.Object(id=GUILD_ID)
+        synced = await self.tree.sync(guild=guild)
+        print(f"✅ Guild Slash Commands Synced: {len(synced)} commands")
+    else:
+        synced = await self.tree.sync()
+        print(f"✅ Global Slash Commands Synced: {len(synced)} commands")
 
 
 bot = MyBot()
