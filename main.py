@@ -4,14 +4,19 @@ import time
 import sqlite3
 import asyncio
 import datetime
+import json
+import base64
+import audioop
+import queue
 
 import psutil
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from discord.ext import voice_recv
 from dotenv import load_dotenv
 
-
+import websockets
 import google.generativeai as genai
 from ddgs import DDGS
 
@@ -24,6 +29,9 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime")
+
 BOT_NAME = os.getenv("BOT_NAME", "gosu")
 
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
@@ -53,6 +61,7 @@ text_model = genai.GenerativeModel("gemini-1.5-flash")
 # =========================
 
 start_time = time.time()
+voice_sessions = {}
 
 
 # =========================
@@ -76,10 +85,6 @@ conn.commit()
 
 
 def save_to_db(channel_id: int, role: str, content: str):
-    """
-    Keep memory small for 1GB RAM server.
-    Store only latest 8 messages per channel.
-    """
     content = content[:1200]
 
     c.execute(
@@ -150,7 +155,6 @@ async def pro_search(query: str) -> str:
         title = res.get("title", "")
         body = res.get("body", "")
         href = res.get("href", "")
-
         context += f"- {title}: {body} ({href})\n"
 
     return context[:2500]
@@ -231,7 +235,420 @@ async def ask_lung_ood(
 
 
 # =========================
-# Slash Commands
+# Voice Utilities
+# =========================
+
+class PCMQueueAudioSource(discord.AudioSource):
+    """
+    Discord voice output format:
+    48kHz, stereo, signed 16-bit PCM, 20ms frame = 3840 bytes
+    """
+
+    FRAME_SIZE = 3840
+
+    def __init__(self):
+        self.q = queue.Queue(maxsize=160)
+        self.buffer = bytearray()
+        self.closed = False
+
+    def is_opus(self):
+        return False
+
+    def read(self) -> bytes:
+        if self.closed:
+            return b""
+
+        while len(self.buffer) < self.FRAME_SIZE:
+            try:
+                chunk = self.q.get_nowait()
+                self.buffer.extend(chunk)
+            except queue.Empty:
+                break
+
+        if len(self.buffer) >= self.FRAME_SIZE:
+            frame = self.buffer[:self.FRAME_SIZE]
+            del self.buffer[:self.FRAME_SIZE]
+            return bytes(frame)
+
+        return b"\x00" * self.FRAME_SIZE
+
+    def push(self, pcm48_stereo: bytes):
+        if not pcm48_stereo:
+            return
+
+        try:
+            if not self.q.full():
+                self.q.put_nowait(pcm48_stereo)
+        except queue.Full:
+            pass
+
+    def cleanup(self):
+        self.closed = True
+
+
+class AudioResampler:
+    """
+    ใช้ audioop เพื่อลดภาระเครื่อง:
+    - Discord input: 48k stereo PCM16
+    - OpenAI input: 24k mono PCM16
+    - OpenAI output: 24k mono PCM16
+    - Discord output: 48k stereo PCM16
+    """
+
+    def __init__(self):
+        self.to_ai_state = None
+        self.to_discord_state = None
+
+    def discord_to_ai(self, pcm48_stereo: bytes) -> bytes:
+        if not pcm48_stereo:
+            return b""
+
+        try:
+            mono48 = audioop.tomono(pcm48_stereo, 2, 0.5, 0.5)
+            mono24, self.to_ai_state = audioop.ratecv(
+                mono48,
+                2,
+                1,
+                48000,
+                24000,
+                self.to_ai_state
+            )
+            return mono24
+        except Exception as e:
+            print(f"discord_to_ai resample error: {e}")
+            return b""
+
+    def ai_to_discord(self, pcm24_mono: bytes) -> bytes:
+        if not pcm24_mono:
+            return b""
+
+        try:
+            mono48, self.to_discord_state = audioop.ratecv(
+                pcm24_mono,
+                2,
+                1,
+                24000,
+                48000,
+                self.to_discord_state
+            )
+            stereo48 = audioop.tostereo(mono48, 2, 1.0, 1.0)
+            return stereo48
+        except Exception as e:
+            print(f"ai_to_discord resample error: {e}")
+            return b""
+
+
+class OpenAIRealtimeVoice:
+    def __init__(self):
+        self.ws = None
+        self.recv_task = None
+        self.audio_out = queue.Queue(maxsize=160)
+        self.connected = False
+
+    async def connect(self):
+        if not OPENAI_API_KEY:
+            raise RuntimeError("Missing OPENAI_API_KEY")
+
+        url = f"wss://api.openai.com/v1/realtime?model={OPENAI_REALTIME_MODEL}"
+
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "OpenAI-Safety-Identifier": "discord-pvrbot",
+        }
+
+        try:
+            self.ws = await websockets.connect(
+                url,
+                additional_headers=headers,
+                max_size=2 ** 20,
+                ping_interval=20,
+                ping_timeout=20,
+            )
+        except TypeError:
+            self.ws = await websockets.connect(
+                url,
+                extra_headers=headers,
+                max_size=2 ** 20,
+                ping_interval=20,
+                ping_timeout=20,
+            )
+
+        self.connected = True
+
+        await self.send({
+            "type": "session.update",
+            "session": {
+                "modalities": ["text", "audio"],
+                "instructions": (
+                    "คุณคือ 'ลุงอ๊อด' ผู้ช่วยเสียงภาษาไทย "
+                    "ตอบสั้น กระชับ สุภาพ เป็นกันเอง "
+                    "เรียกตัวเองว่า 'ลุง' และเรียกผู้ใช้ว่า 'หลาน'"
+                ),
+                "voice": "alloy",
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.55,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 650,
+                },
+            },
+        })
+
+        self.recv_task = asyncio.create_task(self.recv_loop())
+
+    async def send(self, payload: dict):
+        if self.ws:
+            await self.ws.send(json.dumps(payload))
+
+    async def say_text(self, text: str):
+        if not self.connected:
+            return
+
+        await self.send({
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": text,
+                    }
+                ],
+            },
+        })
+
+        await self.send({
+            "type": "response.create",
+            "response": {
+                "modalities": ["audio", "text"],
+            },
+        })
+
+    async def send_audio_pcm16(self, pcm24_mono: bytes):
+        if not self.connected or not pcm24_mono:
+            return
+
+        audio_b64 = base64.b64encode(pcm24_mono).decode("ascii")
+
+        await self.send({
+            "type": "input_audio_buffer.append",
+            "audio": audio_b64,
+        })
+
+    async def commit_audio(self):
+        if not self.connected:
+            return
+
+        await self.send({"type": "input_audio_buffer.commit"})
+        await self.send({
+            "type": "response.create",
+            "response": {
+                "modalities": ["audio", "text"],
+            },
+        })
+
+    async def recv_loop(self):
+        try:
+            async for raw in self.ws:
+                event = json.loads(raw)
+                event_type = event.get("type")
+
+                if event_type in (
+                    "response.audio.delta",
+                    "response.output_audio.delta",
+                ):
+                    delta = event.get("delta")
+                    if delta:
+                        pcm = base64.b64decode(delta)
+                        try:
+                            if not self.audio_out.full():
+                                self.audio_out.put_nowait(pcm)
+                        except queue.Full:
+                            pass
+
+                elif event_type == "response.text.delta":
+                    delta = event.get("delta", "")
+                    if delta:
+                        print(delta, end="", flush=True)
+
+                elif event_type == "response.done":
+                    print("\n✅ Realtime response done")
+
+                elif event_type == "error":
+                    print("❌ OpenAI realtime error:", event)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"Realtime recv error: {e}")
+
+    async def close(self):
+        self.connected = False
+
+        if self.recv_task:
+            self.recv_task.cancel()
+
+        if self.ws:
+            await self.ws.close()
+
+
+class RealtimeAudioSink(voice_recv.AudioSink):
+    def __init__(self, session):
+        super().__init__()
+        self.session = session
+
+    def wants_opus(self) -> bool:
+        return False
+
+    def write(self, user: discord.Member, data):
+        if not user or user.bot:
+            return
+
+        pcm = getattr(data, "pcm", None)
+        if not pcm:
+            return
+
+        self.session.feed_user_audio(user.id, pcm)
+
+    def cleanup(self):
+        pass
+
+
+class VoiceSession:
+    def __init__(self, bot, guild_id: int):
+        self.bot = bot
+        self.guild_id = guild_id
+        self.voice_client = None
+
+        self.source = PCMQueueAudioSource()
+        self.resampler = AudioResampler()
+        self.realtime = OpenAIRealtimeVoice()
+
+        self.active_user_id = None
+        self.audio_in = queue.Queue(maxsize=100)
+
+        self.last_audio_time = 0
+        self.has_audio_since_commit = False
+        self.tasks = []
+
+    async def join(self, channel: discord.VoiceChannel):
+        if self.voice_client and self.voice_client.is_connected():
+            await self.voice_client.move_to(channel)
+        else:
+            self.voice_client = await channel.connect(
+                cls=voice_recv.VoiceRecvClient,
+                self_deaf=False,
+                self_mute=False,
+                timeout=20,
+                reconnect=True,
+            )
+
+        if not self.realtime.connected:
+            await self.realtime.connect()
+
+        try:
+            self.voice_client.listen(RealtimeAudioSink(self))
+        except Exception as e:
+            print(f"listen error: {e}")
+
+        if not self.voice_client.is_playing():
+            self.voice_client.play(self.source)
+
+        if not self.tasks:
+            self.tasks.append(asyncio.create_task(self.audio_to_ai_loop()))
+            self.tasks.append(asyncio.create_task(self.ai_to_discord_loop()))
+
+    def feed_user_audio(self, user_id: int, pcm48_stereo: bytes):
+        """
+        รับทีละ 1 speaker ป้องกันเสียงหลายคนปนกันบน e2-micro
+        """
+        if self.active_user_id is None:
+            self.active_user_id = user_id
+
+        if user_id != self.active_user_id:
+            return
+
+        pcm24_mono = self.resampler.discord_to_ai(pcm48_stereo)
+
+        if not pcm24_mono:
+            return
+
+        try:
+            if not self.audio_in.full():
+                self.audio_in.put_nowait(pcm24_mono)
+                self.last_audio_time = time.time()
+                self.has_audio_since_commit = True
+        except queue.Full:
+            pass
+
+    async def audio_to_ai_loop(self):
+        while True:
+            await asyncio.sleep(0.01)
+
+            try:
+                pcm24_mono = self.audio_in.get_nowait()
+            except queue.Empty:
+                if (
+                    self.active_user_id is not None
+                    and self.has_audio_since_commit
+                    and time.time() - self.last_audio_time > 1.0
+                ):
+                    try:
+                        await self.realtime.commit_audio()
+                    except Exception as e:
+                        print(f"commit audio error: {e}")
+
+                    self.active_user_id = None
+                    self.has_audio_since_commit = False
+
+                continue
+
+            try:
+                await self.realtime.send_audio_pcm16(pcm24_mono)
+            except Exception as e:
+                print(f"send audio error: {e}")
+
+    async def ai_to_discord_loop(self):
+        while True:
+            await asyncio.sleep(0.005)
+
+            try:
+                api_pcm24 = self.realtime.audio_out.get_nowait()
+            except queue.Empty:
+                continue
+
+            pcm48_stereo = self.resampler.ai_to_discord(api_pcm24)
+
+            if pcm48_stereo:
+                self.source.push(pcm48_stereo)
+
+    async def say_text(self, text: str):
+        await self.realtime.say_text(text)
+
+    async def leave(self):
+        for task in self.tasks:
+            task.cancel()
+
+        self.tasks.clear()
+
+        try:
+            if self.voice_client:
+                self.voice_client.stop_listening()
+        except Exception:
+            pass
+
+        await self.realtime.close()
+        self.source.cleanup()
+
+        if self.voice_client:
+            await self.voice_client.disconnect(force=True)
+
+
+# =========================
+# Slash Commands: OOD
 # =========================
 
 class OodGroup(app_commands.Group):
@@ -414,6 +831,98 @@ class OodGroup(app_commands.Group):
 
 
 # =========================
+# Slash Commands: Voice
+# =========================
+
+class VoiceGroup(app_commands.Group):
+    def __init__(self):
+        super().__init__(
+            name="voice",
+            description="คำสั่งโหมดเสียงของลุงอ๊อด"
+        )
+
+    @app_commands.command(name="join", description="ให้ลุงอ๊อดเข้าห้องเสียง")
+    async def join(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            await interaction.followup.send(
+                "หลานต้องเข้าห้องเสียงก่อนนะครับ",
+                ephemeral=True
+            )
+            return
+
+        if not OPENAI_API_KEY:
+            await interaction.followup.send(
+                "ยังไม่ได้ตั้งค่า OPENAI_API_KEY ในไฟล์ .env ครับ",
+                ephemeral=True
+            )
+            return
+
+        channel = interaction.user.voice.channel
+        guild_id = interaction.guild_id
+
+        session = voice_sessions.get(guild_id)
+
+        if not session:
+            session = VoiceSession(interaction.client, guild_id)
+            voice_sessions[guild_id] = session
+
+        try:
+            await session.join(channel)
+            await interaction.followup.send(
+                f"✅ ลุงเข้าห้องเสียง `{channel.name}` แล้วครับ",
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"voice join error: {e}")
+            await interaction.followup.send(
+                f"❌ เข้าห้องเสียงไม่สำเร็จ: `{e}`",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="leave", description="ให้ลุงอ๊อดออกจากห้องเสียง")
+    async def leave(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        session = voice_sessions.pop(interaction.guild_id, None)
+
+        if session:
+            await session.leave()
+
+        await interaction.followup.send(
+            "👋 ลุงออกจากห้องเสียงแล้วครับ",
+            ephemeral=True
+        )
+
+    @app_commands.command(name="talk", description="ให้ลุงพูดข้อความผ่านเสียง")
+    async def talk(self, interaction: discord.Interaction, text: str):
+        await interaction.response.defer(ephemeral=True)
+
+        session = voice_sessions.get(interaction.guild_id)
+
+        if not session:
+            await interaction.followup.send(
+                "ลุงยังไม่ได้อยู่ในห้องเสียงครับ ใช้ `/voice join` ก่อนนะ",
+                ephemeral=True
+            )
+            return
+
+        try:
+            await session.say_text(text)
+            await interaction.followup.send(
+                "✅ ส่งให้ลุงพูดแล้วครับ",
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"voice talk error: {e}")
+            await interaction.followup.send(
+                f"❌ พูดไม่สำเร็จ: `{e}`",
+                ephemeral=True
+            )
+
+
+# =========================
 # Bot Setup Low RAM
 # =========================
 
@@ -421,7 +930,6 @@ class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
 
-        # Low RAM mode for e2-micro
         intents.presences = False
         intents.members = False
         intents.message_content = False
@@ -440,25 +948,31 @@ class MyBot(commands.Bot):
         )
 
     async def setup_hook(self):
-    try:
-        self.tree.add_command(OodGroup())
-    except app_commands.CommandAlreadyRegistered:
-        print("⚠️ OodGroup already registered, skip add_command")
+        try:
+            self.tree.add_command(OodGroup())
+        except app_commands.CommandAlreadyRegistered:
+            print("⚠️ OodGroup already registered, skip add_command")
 
-    if GUILD_ID:
-        guild = discord.Object(id=GUILD_ID)
-        synced = await self.tree.sync(guild=guild)
-        print(f"✅ Guild Slash Commands Synced: {len(synced)} commands")
-    else:
-        synced = await self.tree.sync()
-        print(f"✅ Global Slash Commands Synced: {len(synced)} commands")
+        try:
+            self.tree.add_command(VoiceGroup())
+        except app_commands.CommandAlreadyRegistered:
+            print("⚠️ VoiceGroup already registered, skip add_command")
+
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            self.tree.copy_global_to(guild=guild)
+            synced = await self.tree.sync(guild=guild)
+            print(f"✅ Guild Slash Commands Synced: {len(synced)} commands")
+        else:
+            synced = await self.tree.sync()
+            print(f"✅ Global Slash Commands Synced: {len(synced)} commands")
 
 
 bot = MyBot()
 
 
 # =========================
-# Voice Auto Recovery Placeholder
+# Voice Auto Recovery
 # =========================
 
 async def send_recovery_log(status_type: str, reason: str):
@@ -488,11 +1002,42 @@ async def send_recovery_log(status_type: str, reason: str):
 
 @tasks.loop(seconds=30)
 async def check_voice_status():
-    """
-    ตอนนี้ยังไม่ connect voice อัตโนมัติ
-    เดี๋ยวเฟสถัดไปเราจะเพิ่ม /voice join และ realtime voice ตรงนี้
-    """
     await bot.wait_until_ready()
+
+    if not TARGET_VOICE_CHANNEL_ID:
+        return
+
+    channel = bot.get_channel(TARGET_VOICE_CHANNEL_ID)
+
+    if not isinstance(channel, discord.VoiceChannel):
+        return
+
+    session = voice_sessions.get(channel.guild.id)
+
+    if not session:
+        return
+
+    vc = session.voice_client
+
+    if vc is None or not vc.is_connected():
+        try:
+            await session.join(channel)
+            await send_recovery_log(
+                "drop",
+                "บอทหลุดจากห้องเสียงและเชื่อมต่อกลับอัตโนมัติ"
+            )
+        except Exception as e:
+            print(f"Voice recovery failed: {e}")
+
+    elif vc.channel.id != TARGET_VOICE_CHANNEL_ID:
+        try:
+            await vc.move_to(channel)
+            await send_recovery_log(
+                "move",
+                "บอทถูกย้ายห้องและดึงกลับห้องเป้าหมายแล้ว"
+            )
+        except Exception as e:
+            print(f"Voice move recovery failed: {e}")
 
 
 @bot.event
