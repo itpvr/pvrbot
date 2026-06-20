@@ -960,7 +960,6 @@ class MyBot(commands.Bot):
 
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             print(f"✅ Guild Slash Commands Synced: {len(synced)} commands")
         else:
