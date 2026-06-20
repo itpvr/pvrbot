@@ -949,18 +949,33 @@ class MyBot(commands.Bot):
         )
 
     async def setup_hook(self):
-        try:
-            self.tree.add_command(OodGroup())
-        except app_commands.CommandAlreadyRegistered:
-            print("⚠️ OodGroup already registered, skip add_command")
-
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
+
+            # 1) ล้างคำสั่งเก่าใน guild นี้
+            self.tree.clear_commands(guild=guild)
+
+            # 2) ล้าง global commands เก่าที่อาจค้างอยู่
+            self.tree.clear_commands(guild=None)
+
+            # 3) sync global เป็นว่าง เพื่อลบ command global เก่า
+            await self.tree.sync()
+
+            # 4) เพิ่ม /ood เวอร์ชันใหม่ลง guild โดยตรง
+            self.tree.add_command(OodGroup(), guild=guild)
+
+            # 5) sync guild แบบทันที
             synced = await self.tree.sync(guild=guild)
-            print(f"✅ Guild Slash Commands Synced: {len(synced)} top-level commands")
+
+            print(f"✅ Force Guild Slash Commands Synced: {len(synced)} commands")
+            for cmd in synced:
+                print(f" - /{cmd.name}")
+
         else:
+            print("⚠️ Missing GUILD_ID, cannot force guild sync")
+            self.tree.add_command(OodGroup())
             synced = await self.tree.sync()
-            print(f"✅ Global Slash Commands Synced: {len(synced)} top-level commands")
+            print(f"✅ Global Slash Commands Synced: {len(synced)} commands")
 
 
 bot = MyBot()
